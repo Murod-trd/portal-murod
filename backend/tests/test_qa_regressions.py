@@ -431,3 +431,18 @@ def test_news_order_is_explicit_about_null_publication_dates(hr):
     with CaptureQueriesContext(connection) as queries:
         svc.news(user,{'manage':'true'})
     assert any(re.search(r'ORDER BY .*"published_at" DESC NULLS LAST',q['sql']) for q in queries)
+
+# 12. server-side traceback for unexpected errors
+def test_unexpected_error_logs_traceback_but_response_stays_generic(hr,monkeypatch,caplog):
+    from portal import services as svc
+    def boom(*args,**kwargs):
+        raise RuntimeError('secret-internal-detail')
+    monkeypatch.setattr(svc,'units',boom)
+    _,_,api=hr
+    with caplog.at_level('ERROR',logger='portal'):
+        response=api.get('/api/v1/org-units')
+    assert response.status_code==500 and response.json()=={'code':'INTERNAL_ERROR'}
+    assert 'secret-internal-detail' not in response.content.decode()
+    record=next(r for r in caplog.records if r.name=='portal')
+    assert record.exc_info and record.exc_info[0] is RuntimeError
+    assert 'Traceback' in caplog.text and 'secret-internal-detail' in caplog.text
