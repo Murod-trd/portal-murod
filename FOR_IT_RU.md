@@ -36,6 +36,6 @@
 3. В постоянном каталоге задать реальные параметры компании и установить по [HANDOVER_RU.md](HANDOVER_RU.md). Синтетические аккаунты, сертификаты и данные разработчика не поставляются.
 4. Проверить офис/VPN/TLS/ACL, приёмку реальных сканов, оповещения, копии и восстановление на другом физическом сервере. Утвердить RPO/RTO и эксплуатационный допуск до реальных данных.
 
-PostgreSQL остаётся 17.11, но использует signed-APK storage family `postgresql17-apk-alpine3.24`. Прежние upstream/Debian/Alpine PGDATA не подключать к новой сборке: только отдельный логический перенос по [POSTGRES_MIGRATION_RU.md](docs/POSTGRES_MIGRATION_RU.md). Автоматический update/restore запрещает несовместимое семейство; manifest копий не редактировать для обхода.
+PostgreSQL — 17.12 (пакет 17.11-r0 удалён из Alpine 3.24; минорное обновление в той же линии хранения), но использует signed-APK storage family `postgresql17-apk-alpine3.24`. Прежние upstream/Debian/Alpine PGDATA не подключать к новой сборке: только отдельный логический перенос по [POSTGRES_MIGRATION_RU.md](docs/POSTGRES_MIGRATION_RU.md). Автоматический update/restore запрещает несовместимое семейство; manifest копий не редактировать для обхода.
 
 `technicalChecksPassed` полной Linux-команды здесь не заявлен. `productionApproved=false` сохраняется до внешнего допуска. Независимый пентест, DNS/TLS/VPN компании, целевая нагрузка, реальный OCR-корпус и второй физический recovery-хост локальными тестами не подтверждены.
