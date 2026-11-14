@@ -427,4 +427,4 @@ def permanent_delete(user,kind,id,confirmation):
     return {'success':True,'storagePurgeQueued':bool(orphan_ids)}
 
 def search(user,q):
-    return {'employees':employees(user,{'q':q,'limit':6}),'news':news(user,{'q':q,'limit':6}),'documents':documents(user,{'q':q,'limit':6}),'units':[u for u in units() if normalize(q) in normalize(u['name'])][:6]}
+    return {'employees':employees(user,{'q':q,'limit':6}),'news':news(user,{'q':q,'limit':6}),'documents':documents(user,{'q':q,'limit':6,'inside':'true'}),'units':[u for u in units() if normalize(q) in normalize(u['name'])][:6]}

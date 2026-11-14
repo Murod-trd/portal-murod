@@ -1,4 +1,7 @@
 import json
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from portal import services as svc
 import uuid
 import pytest
 from django.conf import settings
@@ -446,3 +449,44 @@ def test_unexpected_error_logs_traceback_but_response_stays_generic(hr,monkeypat
     record=next(r for r in caplog.records if r.name=='portal')
     assert record.exc_info and record.exc_info[0] is RuntimeError
     assert 'Traceback' in caplog.text and 'secret-internal-detail' in caplog.text
+
+# 13. global search also looks inside document contents
+def search_docs(api,q):
+    response=api.get('/api/v1/search',{'q':q})
+    assert response.status_code==200,response.content
+    return response.json()['documents']
+
+@pytest.mark.parametrize('role',['hr','employee'])
+def test_global_search_finds_words_only_present_in_document_text(hr,employee,role):
+    from .test_content_and_files import create_doc
+    d,_,_=create_doc(hr,new_text='zyxwordonly appears just inside the extracted text')
+    api={'hr':hr,'employee':employee}[role][2]
+    found=search_docs(api,'zyxwordonly')
+    assert found['total']==1 and found['items'][0]['id']==str(d.id)
+    assert found['items'][0]['snippet'].startswith('zyxwordonly')
+    assert search_docs(api,'absentwordqq')['total']==0
+
+def test_global_search_content_hits_follow_document_visibility(hr,employee):
+    from .test_content_and_files import create_doc
+    from django.utils import timezone
+    d,_,new=create_doc(hr,new_text='hiddenneedle in text')
+    api=employee[2]
+    assert search_docs(api,'hiddenneedle')['total']==1
+    d.status='DRAFT';d.save()
+    assert search_docs(api,'hiddenneedle')['total']==0
+    d.status='PUBLISHED';d.deleted_at=timezone.now();d.save()
+    assert search_docs(api,'hiddenneedle')['total']==0
+    d.deleted_at=None;d.save()
+    new.file.security_status='QUARANTINED';new.file.save()
+    assert search_docs(api,'hiddenneedle')['total']==0
+    new.file.security_status='APPROVED';new.file.save()
+    assert search_docs(api,'hiddenneedle')['total']==1
+
+def test_global_search_content_query_cost_is_bounded(hr,employee):
+    from .test_content_and_files import create_doc
+    create_doc(hr,new_text='costword '+('long text '*100000))
+    with CaptureQueriesContext(connection) as captured:
+        result=svc.search(employee[0],'costword')
+    assert result['documents']['total']==1 and len(result['documents']['items'][0]['snippet'])<=360
+    assert len(result['documents']['items'])<=6
+    assert not any('normalized_text' in q['sql'].split(' FROM ')[0] for q in captured)
