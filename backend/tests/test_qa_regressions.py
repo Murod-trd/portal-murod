@@ -144,3 +144,97 @@ def test_old_apostrophe_phone_exports_still_import(hr,org):
     f.parsed_data={'headers':['displayName','positionTitle','unit','office','mobilePhone'],'rows':[['Old export','Specialist',org[1].name,org[0].name,"'+998 90 123 45 67"]]};f.save()
     p=api.post('/api/v1/employees/import/preview',{'fileId':str(f.id)}).json()
     assert not p['errors'] and p['rows'][0]['data']['mobilePhone']=='+998 90 123 45 67'
+
+def emp_body(org,**extra):
+    return {'displayName':'Fresh Person','positionTitle':'Specialist','unitId':str(org[1].id),'officeId':str(org[0].id),**extra}
+
+# 4. restore into inactive unit / office, 10. repeated archive / restore
+def test_restore_into_inactive_unit_or_office_is_409(hr,org):
+    _,_,api=hr
+    e=employee_of(org,status='ARCHIVED')
+    org[1].active=False;org[1].save()
+    response=api.post(f'/api/v1/employees/{e.id}/restore')
+    assert response.status_code==409 and response.json()['code']=='UNIT_INACTIVE'
+    org[1].active=True;org[1].save();org[0].active=False;org[0].save()
+    response=api.post(f'/api/v1/employees/{e.id}/restore')
+    assert response.status_code==409 and response.json()['code']=='OFFICE_INACTIVE'
+    e.refresh_from_db()
+    assert e.status=='ARCHIVED'
+    org[0].active=True;org[0].save()
+    assert api.post(f'/api/v1/employees/{e.id}/restore').status_code==200
+
+def test_repeated_archive_and_restore_are_409_and_keep_state(hr,org):
+    from django.utils import timezone
+    _,_,api=hr
+    e=employee_of(org)
+    assert api.post(f'/api/v1/employees/{e.id}/restore').status_code==409
+    assert api.post(f'/api/v1/employees/{e.id}/archive').status_code==200
+    e.refresh_from_db();stamp=e.archived_at
+    assert stamp
+    again=api.post(f'/api/v1/employees/{e.id}/archive')
+    assert again.status_code==409 and again.json()['code']=='CONFLICT'
+    e.refresh_from_db()
+    assert e.archived_at==stamp
+    assert api.post(f'/api/v1/employees/{e.id}/restore').status_code==200
+    assert api.post(f'/api/v1/employees/{e.id}/restore').status_code==409
+
+# 5. namesake confirmation
+def test_namesake_asked_only_on_create_or_rename_and_ignores_archived(hr,org):
+    _,_,api=hr
+    employee_of(org,'Fresh Person')
+    assert api.post('/api/v1/employees',emp_body(org)).status_code==409
+    created=api.post('/api/v1/employees',emp_body(org,confirmNamesake=True))
+    assert created.status_code==201
+    eid=created.json()['id']
+    # unrelated edit and an unchanged name do not need confirmation
+    assert api.patch(f'/api/v1/employees/{eid}',{'floor':'3'}).status_code==200
+    assert api.patch(f'/api/v1/employees/{eid}',{'displayName':'Fresh Person','room':'7'}).status_code==200
+    # a real rename onto an existing name does
+    employee_of(org,'Other Name')
+    assert api.patch(f'/api/v1/employees/{eid}',{'displayName':'Other Name'}).status_code==409
+    assert api.patch(f'/api/v1/employees/{eid}',{'displayName':'Other Name','confirmNamesake':True}).status_code==200
+    # archived namesakes do not count
+    employee_of(org,'Gone Person',status='ARCHIVED')
+    assert api.post('/api/v1/employees',emp_body(org,displayName='Gone Person')).status_code==201
+    assert [x['status'] for x in api.get('/api/v1/employees/duplicates',{'name':'Gone Person'}).json()]==['ACTIVE']
+
+# 6. org-unit / office duplicates
+def test_unit_duplicate_names_are_rejected(hr,org):
+    _,_,api=hr
+    response=api.post('/api/v1/org-units',{'name':'  TEST   department '})
+    assert response.status_code==409 and response.json()['code']=='UNIT_ALREADY_EXISTS'
+    parent=api.post('/api/v1/org-units',{'name':'Parent unit'}).json()['id']
+    assert api.post('/api/v1/org-units',{'name':'test department','parentId':parent}).status_code==409
+    other=api.post('/api/v1/org-units',{'name':'Other unit'}).json()['id']
+    assert api.patch(f'/api/v1/org-units/{other}',{'name':'Test Department'}).status_code==409
+    assert api.patch(f'/api/v1/org-units/{other}',{'name':'Other unit','type':'DIVISION'}).status_code==200
+
+def test_inactive_unit_name_can_be_reused_but_not_reactivated_twice(hr,org):
+    _,_,api=hr
+    old=m.OrgUnit.objects.create(name='Legacy unit',active=False)
+    assert api.post('/api/v1/org-units',{'name':'Legacy unit'}).status_code==201
+    assert api.patch(f'/api/v1/org-units/{old.id}',{'active':True}).status_code==409
+
+def test_unit_resolution_in_import_stays_unambiguous(hr,org):
+    from .test_imports import make_file
+    _,_,api=hr
+    assert api.post('/api/v1/org-units',{'name':org[1].name}).status_code==409
+    f=make_file(hr,[['','Unambiguous','Specialist',org[1].name,org[0].name]])
+    assert not api.post('/api/v1/employees/import/preview',{'fileId':str(f.id)}).json()['errors']
+
+def test_office_duplicate_checked_on_reactivation_without_name(hr,org):
+    _,_,api=hr
+    old=m.Office.objects.create(name='Test office',active=False)
+    assert api.patch(f'/api/v1/offices/{old.id}',{'active':True}).status_code==409
+    assert api.post('/api/v1/offices',{'name':'test OFFICE'}).status_code==409
+    spare=m.Office.objects.create(name='Spare office',active=False)
+    assert api.patch(f'/api/v1/offices/{spare.id}',{'active':True}).status_code==200
+
+def test_unit_cannot_be_reactivated_under_inactive_parent(hr,org):
+    _,_,api=hr
+    parent=m.OrgUnit.objects.create(name='Closed parent',active=False)
+    child=m.OrgUnit.objects.create(name='Closed child',parent=parent,active=False)
+    response=api.patch(f'/api/v1/org-units/{child.id}',{'active':True})
+    assert response.status_code==409 and response.json()['code']=='UNIT_INACTIVE'
+    parent.active=True;parent.save()
+    assert api.patch(f'/api/v1/org-units/{child.id}',{'active':True}).status_code==200

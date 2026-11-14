@@ -35,7 +35,7 @@ def employee_queryset():
     return m.Employee.objects.select_related('unit','office','manager','photo')
 
 def duplicate_names(name, exclude=None):
-    qs=m.Employee.objects.filter(normalized_name=normalize(name))
+    qs=m.Employee.objects.filter(normalized_name=normalize(name),status='ACTIVE')
     if exclude:
         qs=qs.exclude(id=exclude)
     return [{'id':str(e.id),'displayName':e.display_name,'employeeNumber':e.employee_number,'status':e.status} for e in qs[:20]]
@@ -90,7 +90,8 @@ def save_employee(user,data,id=None):
                 values[key]=current_reference(values[key],model,**conditions)
         obj=get_or_error(m.Employee.objects.select_for_update(),pk=id) if id else m.Employee()
         name=values.get('display_name',obj.display_name)
-        matches=duplicate_names(name,id)
+        # Namesakes matter when a person is created or renamed, not on every unrelated edit.
+        matches=duplicate_names(name,id) if not id or normalize(name)!=obj.normalized_name else []
         if matches and not confirm:
             raise PortalError('DUPLICATE_NAME',409,{'matches':matches})
         manager=values.get('manager',obj.manager if id else None)
@@ -109,6 +110,8 @@ def save_employee(user,data,id=None):
 def archive_employee(user,id,data):
     with domain_write():
         e=get_or_error(m.Employee.objects.select_for_update(),pk=id)
+        if e.status=='ARCHIVED':
+            raise PortalError('CONFLICT',409)
         accounts=m.UserAccount.objects.filter(employee=e,user__is_active=True)
         if accounts.filter(role='ADMIN').exists() and not m.UserAccount.objects.filter(role='ADMIN',user__is_active=True).exclude(employee=e).exists():
             raise PortalError('LAST_ADMIN',409)
@@ -140,7 +143,13 @@ def archive_employee(user,id,data):
 
 def restore_employee(user,id):
     with domain_write():
-        e=get_or_error(m.Employee.objects.select_for_update(),pk=id)
+        e=get_or_error(m.Employee.objects.select_for_update().select_related('unit','office'),pk=id)
+        if e.status!='ARCHIVED':
+            raise PortalError('CONFLICT',409)
+        if not e.unit.active:
+            raise PortalError('UNIT_INACTIVE',409)
+        if not e.office.active:
+            raise PortalError('OFFICE_INACTIVE',409)
         e.status,e.archived_at='ACTIVE',None
         e.save()
         audit(user,'EMPLOYEE_RESTORED','EMPLOYEE',id,['status'])
@@ -171,13 +180,19 @@ def save_unit(user,data,id=None):
             if key in values:
                 values[key]=current_reference(values[key],model,**conditions)
         obj=get_or_error(m.OrgUnit.objects.select_for_update(),pk=id) if id else m.OrgUnit()
-        parent=values.get('parent',obj.parent if id else None)
+        parent=parent_unit=values.get('parent',obj.parent if id else None)
         seen=set()
         while parent:
             if parent.pk==obj.pk or parent.pk in seen:
                 raise PortalError('UNIT_CYCLE')
             seen.add(parent.pk)
             parent=parent.parent
+        active=values.get('active',obj.active if id else True)
+        if active and m.OrgUnit.objects.filter(normalized_name=normalize(values.get('name',obj.name)),active=True).exclude(pk=obj.pk).exists():
+            # Imports resolve a unit by its normalized name among all active units, so that must be unique.
+            raise PortalError('UNIT_ALREADY_EXISTS',409)
+        if active and parent_unit and not parent_unit.active:
+            raise PortalError('UNIT_INACTIVE',409)
         if values.get('active') is False and id and (obj.employees.filter(status='ACTIVE').exists() or obj.children.filter(active=True).exists()):
             raise PortalError('UNIT_IN_USE',409)
         for key,value in values.items():
@@ -192,7 +207,7 @@ def save_office(user,data,id=None):
         obj=get_or_error(m.Office.objects.select_for_update(),pk=id) if id else m.Office()
         if values.get('active') is False and id and obj.employees.filter(status='ACTIVE').exists():
             raise PortalError('OFFICE_IN_USE',409)
-        if 'name' in values and m.Office.objects.filter(normalized_name=normalize(values['name']),active=True).exclude(id=obj.pk).exists():
+        if values.get('active',obj.active if id else True) and m.Office.objects.filter(normalized_name=normalize(values.get('name',obj.name)),active=True).exclude(id=obj.pk).exists():
             raise PortalError('OFFICE_ALREADY_EXISTS',409)
         for key,value in values.items():
             setattr(obj,key,value)
