@@ -238,3 +238,83 @@ def test_unit_cannot_be_reactivated_under_inactive_parent(hr,org):
     assert response.status_code==409 and response.json()['code']=='UNIT_INACTIVE'
     parent.active=True;parent.save()
     assert api.patch(f'/api/v1/org-units/{child.id}',{'active':True}).status_code==200
+
+# 7. real spreadsheet row numbers
+def test_parse_import_keeps_real_row_numbers_with_blank_rows():
+    import io,openpyxl
+    from portal.file_processing import parse_import
+    csv_data=b'name,x\nfirst,1\n\n\nsecond,2\n,\nthird,3\n'
+    parsed=parse_import(csv_data,'a.csv')
+    assert [r[0] for r in parsed['rows']]==['first','second','third'] and parsed['rowNumbers']==[2,5,7]
+    book=openpyxl.Workbook();sheet=book.active
+    sheet.append(['name','x']);sheet.append(['first',1]);sheet.append([]);sheet.append(['second',2]);sheet.cell(row=7,column=1,value='third')
+    out=io.BytesIO();book.save(out)
+    parsed=parse_import(out.getvalue(),'a.xlsx')
+    assert [r[0] for r in parsed['rows']]==['first','second','third'] and parsed['rowNumbers']==[2,4,7]
+
+def test_preview_and_commit_use_real_row_numbers(hr,org):
+    from .test_imports import make_file
+    _,_,api=hr
+    ok=lambda name:['',name,'Specialist',org[1].name,org[0].name]
+    f=make_file(hr,[ok('Row two'),['','Row five','Specialist','missing unit',org[0].name],ok('Row six')])
+    f.parsed_data['rowNumbers']=[2,5,6];f.save()
+    p=api.post('/api/v1/employees/import/preview',{'fileId':str(f.id)}).json()
+    assert [r['row'] for r in p['rows']]==[2,5,6]
+    assert [e['row'] for e in p['errors']]==[5]
+    f.parsed_data['rows'][1][3]=org[1].name;f.save()
+    p=api.post('/api/v1/employees/import/preview',{'fileId':str(f.id)}).json()
+    assert not p['errors']
+    ser=api.post(f'/api/v1/employees/import/{p["id"]}/commit',{'previewHash':p['previewHash'],'decisions':{'5':'SKIP'}})
+    assert ser.status_code==200 and ser.json()['skipped']==1 and ser.json()['created']==2
+    assert not m.Employee.objects.filter(display_name='Row five').exists()
+    assert [i['row'] for i in ser.json()['items']]==[2,6]
+
+def test_stored_parsed_data_without_row_numbers_still_previews(hr,org):
+    from .test_imports import make_file
+    _,_,api=hr
+    f=make_file(hr,[['','Legacy one','Specialist',org[1].name,org[0].name],['','Legacy two','Specialist',org[1].name,org[0].name]])
+    assert 'rowNumbers' not in f.parsed_data
+    assert [r['row'] for r in api.post('/api/v1/employees/import/preview',{'fileId':str(f.id)}).json()['rows']]==[2,3]
+
+def test_worker_result_stores_and_validates_row_numbers(hr):
+    from django.conf import settings
+    from .test_content_and_files import approved_fixture
+    user,_,api=hr
+    for numbers,expected in [([2,5],200),([2],409),(['2',5],409),([5,2],409),([1,2],409),('x',409),(None,200)]:
+        f=approved_fixture(user,'import.csv',b'header\nrow',purpose='IMPORT')
+        m.ProcessingJob.objects.filter(status__in=['PENDING','RUNNING']).delete()
+        m.ProcessingJob.objects.update_or_create(file=f,kind='PARSE_IMPORT',defaults={'status':'PENDING','attempts':0})
+        claim=api.client.post('/api/internal/worker/claim',{},content_type='application/json',HTTP_AUTHORIZATION='Bearer '+settings.WORKER_TOKEN)
+        job=claim.json()['job']
+        body={'headers':['a'],'rows':[['1'],['2']]}
+        if numbers is not None:body['rowNumbers']=numbers
+        response=api.client.post(f'/api/internal/worker/{job["id"]}/result',body,content_type='application/json',HTTP_AUTHORIZATION='Bearer '+job['lease'])
+        assert response.status_code in {200,400,409},response.content
+        f.refresh_from_db()
+        if numbers in ([2,5],None) :
+            assert response.status_code==200 and f.parsed_data.get('rowNumbers')==numbers
+        else:
+            assert response.status_code!=200 and f.parsed_data is None
+
+# 8. login throttle counts failures only
+def test_successful_logins_do_not_consume_the_username_budget(hr):
+    from .conftest import API,TEST_PASSWORD
+    name=hr[0].username
+    attempt=lambda password:API().post('/api/v1/auth/login',{'username':name,'password':password}).status_code
+    for _ in range(6):
+        assert attempt('wrong')==401
+    for _ in range(15):
+        assert attempt(TEST_PASSWORD)==200
+    for _ in range(4):
+        assert attempt('wrong')==401
+    # the 11th failure in the window is still limited, and so is a correct password afterwards
+    assert attempt('wrong')==429
+    assert attempt(TEST_PASSWORD)==429
+    assert attempt('wrong')==429
+
+def test_failed_logins_alone_still_lock_the_username(factory):
+    from .conftest import API,TEST_PASSWORD
+    user,_,_=factory('EMPLOYEE')
+    codes=[API().post('/api/v1/auth/login',{'username':user.username,'password':'wrong'}).status_code for _ in range(12)]
+    assert codes==[401]*10+[429]*2
+    assert API().post('/api/v1/auth/login',{'username':user.username,'password':TEST_PASSWORD}).status_code==429

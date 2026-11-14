@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from .errors import PortalError
 from .models import UserAccount, Employee
-from .security import throttle, audit, domain_write
+from .security import throttle, refund_throttle, audit, domain_write
 from .serializers import StrictSerializer, UserInput, validated
 from .services import get_or_error,current_reference
 
@@ -41,10 +41,13 @@ class LoginView(APIView):
     def post(self,request):
         data=validated(LoginInput,request.data)
         throttle(f'login-ip:{request.META.get("PORTAL_CLIENT_IP",request.META.get("REMOTE_ADDR", "local"))}',600,300)
-        throttle(f'login-user:{data["username"].lower()}',10,300)
+        user_key=f'login-user:{data["username"].lower()}'
+        # Counted before the password check (so parallel guesses cannot exceed the limit) and refunded on success: only failures consume the budget.
+        throttle(user_key,10,300)
         user=authenticate(request=request._request,username=data['username'],password=data['password'])
         if not user or not hasattr(user,'portal_account'):
             raise PortalError('INVALID_CREDENTIALS',401)
+        refund_throttle(user_key)
         login(request._request,user)
         now=time.time()
         request.session['login_at']=now

@@ -40,5 +40,10 @@ def throttle(key, limit, seconds):
     if count > limit:
         raise PortalError('RATE_LIMITED', 429)
 
+def refund_throttle(key):
+    """Gives back one unit of a still-open window (a successful login must not use the failure budget)."""
+    digest = hmac.new(settings.SECRET_KEY.encode(), key.encode(), hashlib.sha256).hexdigest()
+    RateLimit.objects.filter(key=digest, expires_at__gt=timezone.now(), count__gt=0).update(count=F('count') - 1)
+
 def managed(user):
     return user.portal_account.role in {'HR','ADMIN'}

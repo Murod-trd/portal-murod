@@ -49,6 +49,10 @@ def preview_import(user,file_id,mapping=None):
     columns={key:headers.index(value) for key,value in mapping.items() if value in headers}
     prepared=[]
     errors=[]
+    numbers=file.parsed_data.get('rowNumbers')
+    if not isinstance(numbers,list) or len(numbers)!=len(file.parsed_data['rows']):
+        # Older parsed data has no real row numbers: assume no blank rows were dropped.
+        numbers=list(range(2,len(file.parsed_data['rows'])+2))
     for index,cells in enumerate(file.parsed_data['rows']):
         row={key:spreadsheet_restore(str(cells[pos]).strip()) if pos<len(cells) else '' for key,pos in columns.items()}
         data={key:value for key,value in row.items() if key in {'displayName','positionTitle','extension','mobilePhone','workEmail','birthday','floor','room'} and value!=''}
@@ -85,9 +89,9 @@ def preview_import(user,file_id,mapping=None):
         matches=duplicate_names(data.get('displayName',''),existing.pk if existing else None)
         # A repeated name inside this same file must also be explicitly confirmed.
         in_file=any(normalize(p['data'].get('displayName',''))==normalize(data.get('displayName','')) for p in prepared)
-        prepared.append({'row':index+2,'data':data,'employeeNumber':row.get('employeeNumber',''),'existingId':str(existing.id) if existing else None,'updatedAt':existing.updated_at.isoformat() if existing else None,'matches':matches,'sameNameInFile':in_file,'errors':row_errors,'suggestedAction':'UPDATE' if existing else ('CHOOSE' if matches or in_file else 'NEW')})
+        prepared.append({'row':numbers[index],'data':data,'employeeNumber':row.get('employeeNumber',''),'existingId':str(existing.id) if existing else None,'updatedAt':existing.updated_at.isoformat() if existing else None,'matches':matches,'sameNameInFile':in_file,'errors':row_errors,'suggestedAction':'UPDATE' if existing else ('CHOOSE' if matches or in_file else 'NEW')})
         if row_errors:
-            errors.append({'row':index+2,'errors':row_errors})
+            errors.append({'row':numbers[index],'errors':row_errors})
     digest=hashlib.sha256(json.dumps(prepared,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
     job=m.ImportJob.objects.create(file=file,created_by=user,rows=prepared,errors=errors,preview_hash=digest)
     audit(user,'IMPORT_PREVIEW','IMPORT',job.id)

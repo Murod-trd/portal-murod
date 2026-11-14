@@ -301,7 +301,10 @@ class WorkerResultView(WorkerView):
             elif job.kind=='PARSE_IMPORT':
                 if not isinstance(result.get('headers'),list) or not isinstance(result.get('rows'),list) or len(result['rows'])>2000 or len(result['headers'])>50:
                     raise PortalError('INVALID_IMPORT_RESULT')
-                file.parsed_data={'headers':result['headers'],'rows':result['rows']}
+                numbers=result.get('rowNumbers')
+                if numbers is not None and (not isinstance(numbers,list) or len(numbers)!=len(result['rows']) or any(type(v) is not int or v<2 for v in numbers) or numbers!=sorted(set(numbers))):
+                    raise PortalError('INVALID_IMPORT_RESULT')
+                file.parsed_data={'headers':result['headers'],'rows':result['rows'],**({'rowNumbers':numbers} if numbers is not None else {})}
                 file.save(update_fields=['parsed_data'])
                 job.status='DONE'
             job.finished_at=timezone.now()
