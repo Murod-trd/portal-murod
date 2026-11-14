@@ -1,3 +1,4 @@
+import datetime as dt
 from collections.abc import Mapping
 import bleach
 from rest_framework import serializers as s
@@ -73,6 +74,18 @@ class Translations(s.DictField):
             result[locale]=ser.validated_data
         return result
 
+class BoundedDateTimeField(s.DateTimeField):
+    """Rejects instants outside 2000-2100 (and values that overflow timezone conversion) with a 400."""
+    def to_internal_value(self,value):
+        try:
+            result=super().to_internal_value(value)
+            valid=2000<=result.astimezone(dt.timezone.utc).year<=2100
+        except (OverflowError,ValueError):
+            valid=False
+        if not valid:
+            raise s.ValidationError('Date is outside the supported range.')
+        return result
+
 class NewsInput(StrictSerializer):
     title = s.CharField(max_length=300)
     summary = s.CharField(max_length=1000, allow_blank=True, required=False, default='')
@@ -83,8 +96,12 @@ class NewsInput(StrictSerializer):
     coverFileId = s.PrimaryKeyRelatedField(source='cover', queryset=m.FileObject.objects.filter(purpose='COVER',security_status='APPROVED'), allow_null=True, required=False)
     status = s.ChoiceField(choices=['DRAFT','PUBLISHED'], required=False, default='DRAFT')
     pinned = s.BooleanField(required=False, default=False)
-    publishedAt = s.DateTimeField(source='published_at',allow_null=True,required=False)
-    expiresAt = s.DateTimeField(source='expires_at',allow_null=True,required=False)
+    publishedAt = BoundedDateTimeField(source='published_at',allow_null=True,required=False)
+    expiresAt = BoundedDateTimeField(source='expires_at',allow_null=True,required=False)
+    def validate(self,attrs):
+        if attrs.get('published_at') and attrs.get('expires_at') and attrs['expires_at']<=attrs['published_at']:
+            raise s.ValidationError({'expiresAt':'Must be later than publishedAt.'})
+        return attrs
     def validate_body(self,value):
         result=html(value)
         if not bleach.clean(result,tags=[],strip=True).strip():

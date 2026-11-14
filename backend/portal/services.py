@@ -243,6 +243,8 @@ def save_news(user,data,id=None):
             m.NewsRevision.objects.create(news=obj,edited_by=user,snapshot={'title':obj.title,'summary':obj.summary,'body':obj.body,'language':obj.language,'translations':obj.translations,'status':obj.status,'pinned':obj.pinned})
         for key,value in values.items():
             setattr(obj,key,value)
+        if obj.published_at and obj.expires_at and obj.expires_at<=obj.published_at:
+            raise PortalError('VALIDATION_ERROR',400,{'expiresAt':['Must be later than publishedAt.']})
         if obj.status=='PUBLISHED' and not obj.published_at:
             obj.published_at=timezone.now()
         obj.save()

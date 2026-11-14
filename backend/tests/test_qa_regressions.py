@@ -68,3 +68,28 @@ def test_import_decisions_must_be_strings(hr,org):
         assert response.status_code!=500
     assert raw(api,'POST','/api/v1/employees/import/preview',{'fileId':[1]}).status_code==400
     assert not m.Employee.objects.filter(display_name='Decision person').exists()
+
+# 2. news dates
+def news_body(**extra):
+    return {'title':'Dates','body':'<p>Body</p>',**extra}
+
+@pytest.mark.parametrize('field',['publishedAt','expiresAt'])
+@pytest.mark.parametrize('value',['0001-01-01T00:00:00','9999-12-31T23:59:59','1999-12-31T23:59:59Z','2101-01-01T00:00:00Z','0001-01-01T00:00:00+14:00','9999-12-31T23:59:59-14:00'])
+def test_news_dates_out_of_range_are_400(hr,field,value):
+    _,_,api=hr
+    response=api.post('/api/v1/news',news_body(**{field:value}))
+    assert response.status_code==400 and response.json()['code']=='VALIDATION_ERROR',response.content
+    assert not m.News.objects.exists()
+
+def test_news_expiry_must_follow_publication(hr):
+    _,_,api=hr
+    for published,expires in [('2030-01-02T00:00:00Z','2030-01-01T00:00:00Z'),('2030-01-01T00:00:00Z','2030-01-01T00:00:00Z')]:
+        assert api.post('/api/v1/news',news_body(publishedAt=published,expiresAt=expires)).status_code==400
+    created=api.post('/api/v1/news',news_body(publishedAt='2030-01-01T00:00:00Z',expiresAt='2030-02-01T00:00:00Z'))
+    assert created.status_code==201,created.content
+    nid=created.json()['id']
+    # a PATCH that sends only one side is compared with the stored other side
+    assert api.patch(f'/api/v1/news/{nid}',{'expiresAt':'2029-12-31T00:00:00Z'}).status_code==400
+    assert api.patch(f'/api/v1/news/{nid}',{'publishedAt':'2030-03-01T00:00:00Z'}).status_code==400
+    assert api.patch(f'/api/v1/news/{nid}',{'expiresAt':'2030-06-01T00:00:00Z'}).status_code==200
+    assert api.patch(f'/api/v1/news/{nid}',{'expiresAt':None}).status_code==200
