@@ -69,7 +69,7 @@ class MeView(AccountView):
         return Response({'id':str(request.user.pk),'name':a.display_name,'username':request.user.username,'role':a.role,'employeeId':str(a.employee_id) if a.employee_id else None,'locale':a.locale,'mustChangePassword':requires_password_change(a),'mfaEnrolled':request.user.totpdevice_set.filter(confirmed=True).exists(),'mfaRequired':requires_mfa(a),'mfaVerified':request.user.is_verified(),'csrfToken':get_token(request),'demo':not __import__('django.conf',fromlist=['settings']).settings.PRODUCTION})
     @extend_schema(operation_id='MeView_patch', request=OpenApiTypes.OBJECT, responses=response_for('MeView','patch'))
     def patch(self,request):
-        if set(request.data)-{'locale'} or request.data.get('locale') not in {'uz','ru','en'}:
+        if set(request.data)-{'locale'} or not isinstance(request.data.get('locale'),str) or request.data['locale'] not in {'uz','ru','en'}:
             raise PortalError('VALIDATION_ERROR')
         account=request.user.portal_account
         account.locale=request.data['locale']

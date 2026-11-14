@@ -94,7 +94,7 @@ def preview_import(user,file_id,mapping=None):
     return {'id':str(job.id),'headers':headers,'mapping':mapping,'rows':prepared,'errors':errors,'total':len(prepared),'previewHash':digest}
 
 def commit_import(user,id,body):
-    if set(body)-{'previewHash','decisions'} or not isinstance(body.get('decisions',{}),dict):
+    if set(body)-{'previewHash','decisions'} or not isinstance(body.get('decisions',{}),dict) or not all(isinstance(v,str) for v in body.get('decisions',{}).values()):
         raise PortalError('INVALID_IMPORT_COMMIT')
     with domain_write():
         job=get_or_error(m.ImportJob.objects.select_for_update(),pk=id)

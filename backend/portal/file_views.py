@@ -14,7 +14,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import FileResponse
 from django.utils import timezone
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -152,6 +152,7 @@ class ReprocessView(APIView):
         return Response({'success':True})
 
 class WorkerView(APIView):
+    parser_classes=[JSONParser]
     authentication_classes=[]
     permission_classes=[AllowAny]
     def worker_access(self,request):

@@ -54,7 +54,7 @@ class EmployeeArchiveView(ManagedView):
     @extend_schema(operation_id='EmployeeArchiveView_post')
     @extend_schema(request=OpenApiTypes.OBJECT,responses=response_for('EmployeeArchiveView','post'))
     def post(self,request,id):
-        if set(request.data)-{'replacementManagerId','confirmDetach'}:
+        if set(request.data)-{'replacementManagerId','confirmDetach'} or not isinstance(request.data.get('confirmDetach',False),bool) or not isinstance(request.data.get('replacementManagerId'),(str,type(None))):
             raise PortalError('VALIDATION_ERROR')
         return Response(svc.archive_employee(request.user,id,request.data))
 

@@ -137,7 +137,7 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ['portal.permissions.PortalSessionAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['portal.permissions.PortalAccess'],
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
-    'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
+    'DEFAULT_PARSER_CLASSES': ['portal.parsers.ObjectJSONParser'],
     'URL_FORMAT_OVERRIDE': None,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'EXCEPTION_HANDLER': 'portal.errors.exception_handler',
