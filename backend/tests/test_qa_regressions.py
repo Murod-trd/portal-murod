@@ -318,3 +318,65 @@ def test_failed_logins_alone_still_lock_the_username(factory):
     codes=[API().post('/api/v1/auth/login',{'username':user.username,'password':'wrong'}).status_code for _ in range(12)]
     assert codes==[401]*10+[429]*2
     assert API().post('/api/v1/auth/login',{'username':user.username,'password':TEST_PASSWORD}).status_code==429
+
+# 9. loose validation
+import datetime as dt
+
+@pytest.mark.parametrize('birthday',['0001-01-01','1899-12-31','2099-01-01','9999-12-31'])
+def test_birthday_must_be_realistic(hr,org,birthday):
+    _,_,api=hr
+    response=api.post('/api/v1/employees',emp_body(org,birthday=birthday))
+    assert response.status_code==400 and response.json()['code']=='VALIDATION_ERROR'
+
+def test_birthday_range_edges_are_accepted(hr,org):
+    _,_,api=hr
+    from django.utils import timezone
+    for i,day in enumerate(['1900-01-01',timezone.localdate().isoformat(),'1985-02-28']):
+        assert api.post('/api/v1/employees',emp_body(org,displayName=f'Born {chr(97+i)}{chr(98+i)}',birthday=day)).status_code==201
+    assert (timezone.localdate()+dt.timedelta(days=1)).isoformat() and api.post('/api/v1/employees',emp_body(org,displayName='Tomorrow Born',birthday=(timezone.localdate()+dt.timedelta(days=1)).isoformat())).status_code==400
+
+@pytest.mark.parametrize('field',['documentDate','effectiveDate'])
+@pytest.mark.parametrize('value',['0001-01-01','1989-12-31','2101-01-01'])
+def test_document_dates_are_bounded(hr,field,value):
+    _,_,api=hr
+    response=api.post('/api/v1/documents',{'title':'Dated','category':'OTHER',field:value})
+    assert response.status_code==400 and response.json()['code']=='VALIDATION_ERROR'
+    ok=api.post('/api/v1/documents',{'title':'Dated','category':'OTHER','documentDate':'1990-01-01','effectiveDate':'2100-12-31'})
+    assert ok.status_code==201,ok.content
+
+def test_effective_date_before_document_date_stays_allowed(hr):
+    # REQUIREMENTS.md treats both dates as independent optional attributes (retroactive effect is legitimate).
+    _,_,api=hr
+    assert api.post('/api/v1/documents',{'title':'Retro','category':'OTHER','documentDate':'2024-05-01','effectiveDate':'2024-01-01'}).status_code==201
+
+@pytest.mark.parametrize('phone',['+++','+','()','12-3','+9 8'])
+def test_phone_needs_digits(hr,org,phone):
+    _,_,api=hr
+    assert api.post('/api/v1/employees',emp_body(org,mobilePhone=phone)).status_code==400
+    assert api.patch('/api/v1/me/contact',{'mobilePhone':phone}).status_code==400
+
+def test_valid_phones_and_blank_are_accepted(hr,org):
+    _,_,api=hr
+    for phone in ['+998 90 123 45 67','+998(90)1234567','12345','']:
+        assert api.patch('/api/v1/me/contact',{'mobilePhone':phone}).status_code==200,phone
+
+@pytest.mark.parametrize('extension',['abc','12a','1 2','+12','12-34'])
+def test_extension_is_digits_only(hr,org,extension):
+    _,_,api=hr
+    assert api.post('/api/v1/employees',emp_body(org,extension=extension)).status_code==400
+
+def test_extension_digits_and_blank_accepted(hr,org):
+    _,_,api=hr
+    for i,extension in enumerate(['201','8790','']):
+        assert api.post('/api/v1/employees',emp_body(org,displayName=f'Ext person {chr(97+i)}{chr(98+i)}',extension=extension)).status_code==201
+
+@pytest.mark.parametrize('bad',['Line\nbreak','Tab\tname','Nul\x00name','Esc\x1bname','Bidi '+chr(0x202e)+'name','Iso '+chr(0x2066)+'name','Mark '+chr(0x200f)+'name','Del\x7fname','Cr\rname'])
+def test_display_name_rejects_control_and_bidi_characters(hr,org,bad):
+    _,_,api=hr
+    response=api.post('/api/v1/employees',emp_body(org,displayName=bad,confirmNamesake=True))
+    assert response.status_code==400 and response.json()['code']=='VALIDATION_ERROR'
+
+def test_normal_international_names_still_pass(hr,org):
+    _,_,api=hr
+    for name in ['Aliyev Aziz Akmalovich','Каримова Малика','Rö Şağ Çalış',"O'Neil-Smith Jr."]:
+        assert api.post('/api/v1/employees',emp_body(org,displayName=name)).status_code==201,name
