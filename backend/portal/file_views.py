@@ -26,15 +26,18 @@ from .services import get_or_error
 
 def valid_ocr_quality(value):
     import math
-    if not isinstance(value,dict) or set(value)-{'engine','ocrPages','meanConfidence','lowConfidenceLines','profiles'}:
+    if not isinstance(value,dict) or set(value)-{'engine','ocrPages','meanConfidence','lowConfidenceLines','profiles','rotatedPages','sparsePages','embeddedImages','rotations'}:
         return False
     if 'engine' in value and (not isinstance(value['engine'],str) or len(value['engine'])>80):
         return False
-    for key in ['ocrPages','lowConfidenceLines']:
+    for key in ['ocrPages','lowConfidenceLines','rotatedPages','sparsePages','embeddedImages']:
         if key in value and (type(value[key]) is not int or not 0<=value[key]<=400000):
             return False
     confidence=value.get('meanConfidence')
     if confidence is not None and (type(confidence) not in {int,float} or not math.isfinite(confidence) or not 0<=confidence<=100):
+        return False
+    rotations=value.get('rotations',[])
+    if not isinstance(rotations,list) or len(rotations)>200 or any(type(v) is not int or v not in {0,90,180,270} for v in rotations):
         return False
     profiles=value.get('profiles',[])
     return isinstance(profiles,list) and len(profiles)<=12 and all(isinstance(v,str) and len(v)<=150 for v in profiles)
@@ -57,7 +60,7 @@ class UploadView(APIView):
         if not upload or upload.size==0 or upload.size>settings.MAX_UPLOAD_BYTES:
             raise PortalError('UPLOAD_SIZE_LIMIT')
         name=Path(upload.name.replace('\\','/')).name.replace('\r','').replace('\n','')[:180]
-        allowed={'DOCUMENT':{'.pdf','.docx'},'IMPORT':{'.csv','.xlsx'},'PHOTO':{'.jpg','.jpeg','.png','.webp'},'COVER':{'.jpg','.jpeg','.png','.webp'}}
+        allowed={'DOCUMENT':{'.pdf','.docx','.jpg','.jpeg','.png','.tif','.tiff'},'IMPORT':{'.csv','.xlsx'},'PHOTO':{'.jpg','.jpeg','.png','.webp'},'COVER':{'.jpg','.jpeg','.png','.webp'}}
         if Path(name).suffix.lower() not in allowed[purpose]:
             raise PortalError('UNSUPPORTED_FORMAT')
         digest=hashlib.sha256()
@@ -127,7 +130,7 @@ class FileDownloadView(APIView):
         obj=get_or_error(m.FileObject.objects,pk=id)
         authorize_download(obj,request.user)
         throttle(f'download:{request.user.pk}',120,60)
-        inline=obj.purpose in {'PHOTO','COVER'} or (obj.mime_type=='application/pdf' and request.query_params.get('inline')=='true')
+        inline=obj.purpose in {'PHOTO','COVER'} or (obj.mime_type in {'application/pdf','image/jpeg','image/png'} and request.query_params.get('inline')=='true')
         response=FileResponse(obj.file.open('rb'),as_attachment=not inline,filename=obj.original_name,content_type=obj.mime_type)
         response['X-Content-Type-Options']='nosniff'
         response['X-Frame-Options']='SAMEORIGIN'
@@ -256,7 +259,7 @@ class WorkerResultView(WorkerView):
             elif job.kind=='SCAN':
                 if result.get('status')!='APPROVED' or not result.get('scannerVersion') or not result.get('signatureVersion'):
                     raise PortalError('INCOMPLETE_SCAN_RESULT')
-                allowed_mime={'DOCUMENT':{'application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document'},'IMPORT':{'text/csv','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},'PHOTO':{'image/jpeg'},'COVER':{'image/jpeg'}}
+                allowed_mime={'DOCUMENT':{'application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','image/jpeg','image/png','image/tiff'},'IMPORT':{'text/csv','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},'PHOTO':{'image/jpeg'},'COVER':{'image/jpeg'}}
                 if result.get('mimeType') not in allowed_mime[file.purpose]:
                     raise PortalError('INVALID_FILE_TYPE')
                 if result.get('cleanedBase64'):

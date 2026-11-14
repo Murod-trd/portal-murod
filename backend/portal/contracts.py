@@ -56,6 +56,9 @@ NewsPage = paginated('News', News)
 Quality = record('OcrQuality', {'engine': text(optional=True), 'ocrPages': integer(optional=True),
                               'meanConfidence': s.FloatField(allow_null=True, required=False),
                               'lowConfidenceLines': integer(optional=True),
+                              'rotatedPages': integer(optional=True), 'sparsePages': integer(optional=True),
+                              'embeddedImages': integer(optional=True),
+                              'rotations': s.ListField(child=integer(), required=False),
                               'profiles': s.ListField(child=text(), required=False)})
 Version = record('Version', {**strings('id label changeNote fileId fileName mimeType securityStatus extractionStatus extractionError createdAt'),
                             **strings('documentDate effectiveDate', True), 'fileSize': integer(), 'ocrQuality': Quality(),
