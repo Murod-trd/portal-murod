@@ -43,7 +43,7 @@ class EmployeeInput(StrictSerializer):
     officeId = s.PrimaryKeyRelatedField(source='office', queryset=m.Office.objects.filter(active=True))
     managerId = s.PrimaryKeyRelatedField(source='manager', queryset=m.Employee.objects.filter(status='ACTIVE'), allow_null=True, required=False)
     extension = s.RegexField(regex=r'^[0-9]+$', max_length=30, allow_blank=True, required=False)
-    workEmail = s.EmailField(source='work_email', allow_blank=True, required=False)
+    workEmail = s.EmailField(source='work_email', max_length=254, allow_blank=True, required=False)
     mobilePhone = s.RegexField(source='mobile_phone', regex=r'^[+\d()\-\s]*$', max_length=40, allow_blank=True, required=False, validators=[validate_phone])
     mobileVisible = s.BooleanField(source='mobile_visible', required=False)
     birthday = s.DateField(allow_null=True, required=False, validators=[validate_birthday])

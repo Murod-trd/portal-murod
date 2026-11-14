@@ -380,3 +380,54 @@ def test_normal_international_names_still_pass(hr,org):
     _,_,api=hr
     for name in ['Aliyev Aziz Akmalovich','Каримова Малика','Rö Şağ Çalış',"O'Neil-Smith Jr."]:
         assert api.post('/api/v1/employees',emp_body(org,displayName=name)).status_code==201,name
+
+# 11. PostgreSQL-only suspicions, covered at the validation layer
+@pytest.mark.parametrize('path',['/api/v1/employees','/api/v1/news','/api/v1/documents','/api/v1/search'])
+@pytest.mark.parametrize('q',['a\x00b','\x00'])
+def test_nul_in_search_text_is_400(hr,path,q):
+    _,_,api=hr
+    response=api.get(path,{'q':q})
+    assert response.status_code==400 and response.json()['code']=='VALIDATION_ERROR'
+    assert api.get(path,{'q':'ab'}).status_code==200
+
+@pytest.mark.parametrize('path,param',[('/api/v1/news','category'),('/api/v1/documents','category'),('/api/v1/employees','officeId')])
+def test_nul_in_any_query_parameter_is_400(hr,path,param):
+    _,_,api=hr
+    assert api.get(path,{param:'x\x00y'}).status_code==400
+    assert api.get(path,{'a\x00':'y'}).status_code==400
+
+def test_services_reject_nul_in_q_directly(hr):
+    from portal import services as svc
+    from portal.errors import PortalError
+    user=hr[0]
+    for call in [lambda:svc.employees(user,{'q':'a\x00'}),lambda:svc.news(user,{'q':'a\x00'}),lambda:svc.documents(user,{'q':'a\x00'}),lambda:svc.documents(user,{'q':'a\x00','history':'true'}),lambda:svc.search(user,'a\x00')]:
+        with pytest.raises(PortalError) as error:
+            call()
+        assert error.value.detail['code']=='VALIDATION_ERROR'
+
+def test_work_email_is_limited_to_the_column_width(hr,org):
+    _,_,api=hr
+    domain='.'.join(['b'*60]*4)
+    fits='a@'+domain[:240]+'.org'
+    assert len(fits)<=254
+    too_long='a'*20+'@'+domain+'.'+'c'*60+'.org'
+    assert len(too_long)>254
+    response=api.post('/api/v1/employees',emp_body(org,workEmail=too_long))
+    assert response.status_code==400,response.content
+    assert 'workEmail' in str(response.json())
+    assert api.post('/api/v1/employees',emp_body(org,workEmail=fits)).status_code==201
+
+def test_news_order_is_explicit_about_null_publication_dates(hr):
+    from portal import services as svc
+    user,_,api=hr
+    older=m.News.objects.create(title='Older',body='B',author=user,status='PUBLISHED',published_at='2030-01-01T00:00:00Z')
+    newer=m.News.objects.create(title='Newer',body='B',author=user,status='PUBLISHED',published_at='2031-01-01T00:00:00Z')
+    draft=m.News.objects.create(title='Draft',body='B',author=user,status='DRAFT')
+    items=[x['id'] for x in api.get('/api/v1/news',{'manage':'true'}).json()['items']]
+    assert items==[str(newer.id),str(older.id),str(draft.id)]
+    import re
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+    with CaptureQueriesContext(connection) as queries:
+        svc.news(user,{'manage':'true'})
+    assert any(re.search(r'ORDER BY .*"published_at" DESC NULLS LAST',q['sql']) for q in queries)

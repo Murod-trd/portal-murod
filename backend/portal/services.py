@@ -1,5 +1,5 @@
 from datetime import datetime
-from django.db.models import Q, Count
+from django.db.models import F, Q, Count
 from django.db.models.functions import Substr
 from django.utils import timezone
 from . import models as m
@@ -23,6 +23,13 @@ def current_reference(value, model, **conditions):
         raise PortalError('FILE_NOT_APPROVED' if model is m.FileObject else 'REFERENCE_CHANGED',409)
     return result
 
+def search_text(value):
+    """Search text as a bounded string; NUL bytes are rejected here because PostgreSQL cannot store or compare them."""
+    value=str(value)
+    if '\x00' in value:
+        raise PortalError('VALIDATION_ERROR')
+    return value[:200]
+
 def page(queryset, query, mapper):
     try:
         number=max(1,min(10000,int(query.get('page',1))))
@@ -43,7 +50,7 @@ def duplicate_names(name, exclude=None):
 def employees(user, query):
     privileged=managed(user)
     qs=employee_queryset().filter(status='ARCHIVED' if privileged and query.get('archived')=='true' else 'ACTIVE')
-    q=str(query.get('q','')).strip()[:200]
+    q=search_text(query.get('q','')).strip()
     date=search_date(q,privileged)
     if q:
         if date:
@@ -234,15 +241,15 @@ def news_data(n,full=False):
 def news(user,query):
     qs=m.News.objects.filter(deleted_at=None) if managed(user) and query.get('manage')=='true' else published_news()
     if query.get('q'):
-        q=normalize(str(query['q'])[:200])
-        qs=qs.filter(Q(normalized_title__contains=q)|Q(summary__icontains=query['q']))
+        raw=search_text(query['q'])
+        qs=qs.filter(Q(normalized_title__contains=normalize(raw))|Q(summary__icontains=raw))
     if query.get('pinned')=='true':
         qs=qs.filter(pinned=True)
     if query.get('category'):
         category=query['category']
         # NEWS is the original persisted value; COMPANY is its UI alias.
         qs=qs.filter(category__in=['NEWS','COMPANY']) if category in {'NEWS','COMPANY'} else qs.filter(category=category)
-    return page(qs.select_related('author__portal_account','cover').annotate(view_count=Count('views')).order_by('-published_at','-created_at'),query,news_data)
+    return page(qs.select_related('author__portal_account','cover').annotate(view_count=Count('views')).order_by(F('published_at').desc(nulls_last=True),'-created_at'),query,news_data)
 
 def article(user,id):
     qs=m.News.objects.filter(deleted_at=None) if managed(user) else published_news()
@@ -301,7 +308,7 @@ def documents(user,query):
             except (TypeError,ValueError):
                 raise PortalError('INVALID_DATE')
             docs=docs.filter(**{lookup:value})
-    q=str(query.get('q',''))[:200]
+    q=search_text(query.get('q',''))
     inside=query.get('inside')=='true'
     if query.get('history')=='true':
         versions=m.DocumentVersion.objects.filter(document__in=docs,file__security_status='APPROVED').select_related('document','file','document__current_version__file')
