@@ -93,3 +93,54 @@ def test_news_expiry_must_follow_publication(hr):
     assert api.patch(f'/api/v1/news/{nid}',{'publishedAt':'2030-03-01T00:00:00Z'}).status_code==400
     assert api.patch(f'/api/v1/news/{nid}',{'expiresAt':'2030-06-01T00:00:00Z'}).status_code==200
     assert api.patch(f'/api/v1/news/{nid}',{'expiresAt':None}).status_code==200
+
+# 3. export phones / formula neutralisation
+def export_roundtrip(hr,org,fmt):
+    from portal.file_processing import parse_import
+    from .test_content_and_files import approved_fixture
+    user,_,api=hr
+    e=employee_of(org,'Round trip person',mobile_phone='+998 90 123-45 67',extension='1234',work_email='rt@example.org')
+    response=api.get('/api/v1/employees/export',{'format':fmt})
+    assert response.status_code==200
+    name='export.'+fmt
+    parsed=parse_import(response.content,name)
+    file=approved_fixture(user,name,response.content,purpose='IMPORT')
+    file.parsed_data=parsed;file.save()
+    return e,parsed,api.post('/api/v1/employees/import/preview',{'fileId':str(file.id)}).json()
+
+@pytest.mark.parametrize('fmt',['csv','xlsx'])
+def test_export_keeps_phones_and_reimports(hr,org,fmt):
+    e,parsed,preview=export_roundtrip(hr,org,fmt)
+    cells=next(r for r in parsed['rows'] if r[1]=='Round trip person')
+    assert cells[parsed['headers'].index('mobilePhone')]=='+998 90 123-45 67'
+    row=next(r for r in preview['rows'] if r['data']['displayName']=='Round trip person')
+    assert not preview['errors'],preview['errors']
+    assert row['data']['mobilePhone']=='+998 90 123-45 67' and row['existingId']==str(e.id)
+
+def test_xlsx_export_writes_plain_strings_never_formulas(hr,org):
+    import io,openpyxl
+    employee_of(org,'=HYPERLINK("x")',mobile_phone='+998901234567')
+    _,_,api=hr
+    book=openpyxl.load_workbook(io.BytesIO(api.get('/api/v1/employees/export',{'format':'xlsx'}).content))
+    cells=[c for row in book.active.iter_rows(min_row=2) for c in row if isinstance(c.value,str)]
+    assert cells and all(c.data_type=='s' for c in cells)
+    assert any(c.value=='+998901234567' for c in cells) and any(c.value.startswith("'=HYPERLINK") for c in cells)
+
+def test_formula_defence_and_apostrophe_restore():
+    from portal.domain import spreadsheet_safe,spreadsheet_restore
+    for bad in ['=1+1','@SUM(A1)','-2+3','+1+1','+998 (90) abc','+','  =x','\t=x','+998;cmd']:
+        assert spreadsheet_safe(bad).startswith("'"),bad
+    for ok in ['+998901234567','+998 90 123 45 67','+7 (495) 123-45-67','plain',"o'brien"]:
+        assert spreadsheet_safe(ok)==ok
+    assert spreadsheet_restore("'+998 90 123 45 67")=='+998 90 123 45 67' and spreadsheet_restore("'=x")=='=x'
+    assert spreadsheet_restore("'plain")=="'plain" and spreadsheet_restore('+998')=='+998'
+    for value in ['=x','-a','+a','@a']:
+        assert spreadsheet_restore(spreadsheet_safe(value))==value
+
+def test_old_apostrophe_phone_exports_still_import(hr,org):
+    from .test_content_and_files import approved_fixture
+    user,_,api=hr
+    f=approved_fixture(user,'old.csv',b'x',purpose='IMPORT')
+    f.parsed_data={'headers':['displayName','positionTitle','unit','office','mobilePhone'],'rows':[['Old export','Specialist',org[1].name,org[0].name,"'+998 90 123 45 67"]]};f.save()
+    p=api.post('/api/v1/employees/import/preview',{'fileId':str(f.id)}).json()
+    assert not p['errors'] and p['rows'][0]['data']['mobilePhone']=='+998 90 123 45 67'

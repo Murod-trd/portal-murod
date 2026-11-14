@@ -2,7 +2,7 @@ import hashlib
 import json
 from django.utils import timezone
 from . import models as m
-from .domain import normalize
+from .domain import normalize,spreadsheet_restore
 from .errors import PortalError
 from .security import audit,domain_write
 from .serializers import EmployeeInput
@@ -50,7 +50,7 @@ def preview_import(user,file_id,mapping=None):
     prepared=[]
     errors=[]
     for index,cells in enumerate(file.parsed_data['rows']):
-        row={key:str(cells[pos]).strip() if pos<len(cells) else '' for key,pos in columns.items()}
+        row={key:spreadsheet_restore(str(cells[pos]).strip()) if pos<len(cells) else '' for key,pos in columns.items()}
         data={key:value for key,value in row.items() if key in {'displayName','positionTitle','extension','mobilePhone','workEmail','birthday','floor','room'} and value!=''}
         row_errors=[]
         if data.get('displayName','').startswith(('ПРИМЕР:','NAMUNA:','EXAMPLE:')):
