@@ -1,6 +1,7 @@
 """Runtime guards are exercised with simulated AV health, not a real ClamAV engine."""
 import io
 import json
+import os
 from datetime import timedelta
 import pytest
 from django.conf import settings
@@ -31,6 +32,7 @@ def test_only_worker_token_can_report_health(hr):
     assert m.WorkerHeartbeat.objects.get(name='file-worker').capabilities=={'ocrLanguages':['eng','uzb'],'processorSandbox':False}
 
 
+@pytest.mark.skipif(os.name!='posix',reason='Readiness checks POSIX private-directory modes, which Windows does not provide')
 def test_readiness_requires_live_worker_models_and_private_storage(settings,tmp_path,monkeypatch):
     settings.PRODUCTION=True;settings.STORAGE_DRIVER='filesystem'
     settings.MEDIA_ROOT.mkdir(mode=0o700,parents=True)

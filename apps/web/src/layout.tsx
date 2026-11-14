@@ -24,7 +24,7 @@ export function Layout({onLogout,children}:{onLogout:()=>void;children?:ReactNod
   useEffect(()=>setMenu(false),[location.pathname]);
   useEffect(()=>{if(menu)menuClose.current?.focus();},[menu]);
   const closeMenu=()=>{setMenu(false);menuButton.current?.focus();};
-  const logout=async()=>{try{await api('/auth/logout','POST',{});onLogout();navigate('/login');}catch(e){showError(e);}};
+  const logout=async()=>{try{await api('/auth/logout','POST',{});onLogout();navigate('/');}catch(e){showError(e);}};
   return <div className="app-shell">
     {showTop&&<button type="button" className="back-to-top" onClick={toTop} aria-label={t('backToTop')} title={t('backToTop')}><ArrowUp size={22}/><span>{t('backToTop')}</span></button>}
     <a className="skip-link" href="#portal-main">{t('skipToContent')}</a>

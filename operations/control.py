@@ -117,7 +117,8 @@ class Controller:
 
 @contextmanager
 def operation_lock(directory):
-    import fcntl
+    try:import fcntl
+    except ImportError as error:raise ConfigurationError('This release requires Linux x86_64. On Windows Server, use a Linux virtual machine.') from error
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True,mode=0o700)
     with open(directory/'operation.lock','a') as stream:
         try:fcntl.flock(stream,fcntl.LOCK_EX|fcntl.LOCK_NB)

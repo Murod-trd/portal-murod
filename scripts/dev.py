@@ -21,11 +21,12 @@ environment={**os.environ,'WORKER_API_URL':f'http://127.0.0.1:{port}'}
 children=[]
 try:
     children.append(subprocess.Popen([str(python),'backend/manage.py','runserver',f'{host}:{port}','--noreload'],env=environment))
-    children.append(subprocess.Popen([str(python),'backend/worker.py'],env=environment))
+    if sys.platform=='linux':children.append(subprocess.Popen([str(python),'backend/worker.py'],env=environment))
+    else:print('File scanning/OCR worker not started: it requires Linux (use Docker or WSL). The API keeps running.',flush=True)
     while True:
         if children[0].poll() is not None:
             raise SystemExit(children[0].returncode)
-        if children[1].poll() is not None:
+        if len(children)>1 and children[1].poll() is not None:
             time.sleep(3)
             children[1]=subprocess.Popen([str(python),'backend/worker.py'],env=environment)
         time.sleep(1)

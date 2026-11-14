@@ -20,6 +20,8 @@ from operations.volume_archive import pack,unpack
 from operations.backup import authenticate,file_digest,signature,prune_backups,restore_backup,key_header
 
 ROOT=Path(__file__).resolve().parents[2]
+linux_only=pytest.mark.skipif(sys.platform!='linux',reason='Parser sandbox (seccomp) requires Linux')
+posix_modes=pytest.mark.skipif(os.name!='posix',reason='Asserts POSIX 0600 file modes, which Windows does not provide')
 
 
 @pytest.fixture
@@ -34,6 +36,7 @@ def installation_root(tmp_path):
     return root,cert,private
 
 
+@posix_modes
 def test_configuration_creates_independent_private_secrets_and_validates_real_tls(installation_root):
     root,cert,key=installation_root
     result=configure(root,'https://portal.test.internal','10.20.0.10',['10.20.0.0/16','10.8.0.0/24'],cert,key)
@@ -98,6 +101,7 @@ def test_real_codec_subprocess_uses_stdin_key_and_authenticates():
     assert invalid.returncode!=0 and invalid.stdout==b'' and key not in invalid.stderr
 
 
+@posix_modes
 def test_private_volume_round_trip_preserves_old_version_bytes(tmp_path):
     source=tmp_path/'source';(source/'quarantine/2026').mkdir(parents=True)
     (source/'quarantine/2026/old.upload').write_bytes(b'old immutable document bytes')
@@ -183,6 +187,7 @@ def test_operator_environment_cannot_override_generated_configuration(installati
     assert 'APP_ORIGIN' not in controller.process_environment and 'COMPOSE_FILE' not in controller.process_environment
     assert controller.environment['APP_ORIGIN']=='https://portal.test.internal'
 
+@linux_only
 def test_real_parser_seccomp_blocks_network_and_parent_signals():
     script='''
 import errno,json,os,socket,subprocess
@@ -201,6 +206,7 @@ print(json.dumps(result))
     assert json.loads(value.stdout)=={'networkBlocked':True,'parentSignalsBlocked':True,'ordinaryChildWorks':True}
 
 
+@linux_only
 def test_parser_refuses_work_when_seccomp_library_is_missing():
     script='''
 import ctypes,ctypes.util

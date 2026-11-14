@@ -25,6 +25,8 @@ Frontend-сборка теперь записывает хеши входных 
 
 Обычная работа с исходниками не требует запуска Docker. Использовать отдельный Python venv и существующие hash-locks; Node нужен только для frontend. SQLite разрешена для разработки и не подтверждает PostgreSQL. Для настоящих загрузок нужны реальный ClamAV и Linux/seccomp; OCR использует Poppler/Tesseract и закреплённые модели. Без AV допуск файла закрыт.
 
+Windows (проверено на Python 3.14): `python -m venv C:\pv`; затем `C:\pv\Scripts\python -m pip install --require-hashes --no-deps -r requirements.lock -r requirements-dev.lock` и `C:\pv\Scripts\python -m pip install tzdata colorama` (в Linux-lock они не входят). Настройка: `C:\pv\Scripts\python scripts/setup.py` (создаёт `.runtime`, миграции и демо-данные; пароли в `.runtime/demo-credentials.json`). Запуск: `C:\pv\Scripts\python scripts/dev.py` (API на :3000; worker файлов/OCR на Windows не запускается, нужен Linux/Docker/WSL). Тесты: `C:\pv\Scripts\python -m pytest backend/tests -q`; тесты seccomp и POSIX-прав на Windows пропускаются.
+
 Команды сборки/проверок и упаковки приведены в FINAL_VERIFICATION_RU.md для последующего разрешённого запуска. Production не использует setup.py/seed_demo, тестовые пароли или вымышленные аккаунты.
 
 ## Статус доказательств
