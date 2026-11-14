@@ -14,7 +14,7 @@ x-build: &build
 x-env: &env
   APP_ENV: production
   APP_ORIGIN: ${APP_ORIGIN:?Run portalctl configure}
-  ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Run portalctl configure}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Run portalctl configure},app
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Run portalctl configure}
   WORKER_TOKEN: ${WORKER_TOKEN:?Run portalctl configure}
   EDGE_PROXY_TOKEN: ${EDGE_PROXY_TOKEN:?Run portalctl configure}
@@ -139,7 +139,7 @@ services:
     image: ${NGINX_IMAGE:?Pinned Nginx required}
     ports: ['${BIND_ADDRESS:?Private bind required}:${TLS_PORT:-443}:443']
     volumes: [./.deploy/nginx.conf:/etc/nginx/nginx.conf:ro, ./.deploy/tls:/etc/nginx/tls:ro]
-    networks: [web]
+    networks: [web, edge]
     depends_on: {app: {condition: service_healthy}}
     read_only: true
     tmpfs: [/var/cache/nginx, /var/run, /tmp]
@@ -202,6 +202,7 @@ networks:
   jobs: {internal: true}
   web: {internal: true}
   signatures-egress: {}
+  edge: {}
 volumes:
   postgres-data: {labels: *labels}
   private-files: {labels: *labels}

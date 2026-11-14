@@ -40,8 +40,8 @@ RUN npm run build:web
 # with its MIT license and the already-tested su-exec substitution.
 FROM ${POSTGRES_IMAGE} AS postgres
 RUN apk add --no-cache bash ca-certificates tzdata zstd su-exec=0.3-r0 \
- postgresql17=17.11-r0 postgresql17-client=17.11-r0 postgresql17-contrib=17.11-r0
-ENV LANG=en_US.utf8 PG_MAJOR=17 PG_VERSION=17.11 PGDATA=/var/lib/postgresql/data PATH=/usr/lib/postgresql17/bin:${PATH}
+ postgresql17=17.12-r0 postgresql17-client=17.12-r0 postgresql17-contrib=17.12-r0
+ENV LANG=en_US.utf8 PG_MAJOR=17 PG_VERSION=17.12 PGDATA=/var/lib/postgresql/data PATH=/usr/lib/postgresql17/bin:${PATH}
 RUN mkdir -p /docker-entrypoint-initdb.d /var/lib/postgresql/data /var/run/postgresql \
  && chown postgres:postgres /var/lib/postgresql/data /var/run/postgresql \
  && chmod 700 /var/lib/postgresql/data && chmod 3775 /var/run/postgresql \
