@@ -1,5 +1,5 @@
 from datetime import datetime
-from django.db.models import Q, Count
+from django.db.models import F, Q, Count
 from django.db.models.functions import Substr
 from django.utils import timezone
 from . import models as m
@@ -23,6 +23,13 @@ def current_reference(value, model, **conditions):
         raise PortalError('FILE_NOT_APPROVED' if model is m.FileObject else 'REFERENCE_CHANGED',409)
     return result
 
+def search_text(value):
+    """Search text as a bounded string; NUL bytes are rejected here because PostgreSQL cannot store or compare them."""
+    value=str(value)
+    if '\x00' in value:
+        raise PortalError('VALIDATION_ERROR')
+    return value[:200]
+
 def page(queryset, query, mapper):
     try:
         number=max(1,min(10000,int(query.get('page',1))))
@@ -35,7 +42,7 @@ def employee_queryset():
     return m.Employee.objects.select_related('unit','office','manager','photo')
 
 def duplicate_names(name, exclude=None):
-    qs=m.Employee.objects.filter(normalized_name=normalize(name))
+    qs=m.Employee.objects.filter(normalized_name=normalize(name),status='ACTIVE')
     if exclude:
         qs=qs.exclude(id=exclude)
     return [{'id':str(e.id),'displayName':e.display_name,'employeeNumber':e.employee_number,'status':e.status} for e in qs[:20]]
@@ -43,7 +50,7 @@ def duplicate_names(name, exclude=None):
 def employees(user, query):
     privileged=managed(user)
     qs=employee_queryset().filter(status='ARCHIVED' if privileged and query.get('archived')=='true' else 'ACTIVE')
-    q=str(query.get('q','')).strip()[:200]
+    q=search_text(query.get('q','')).strip()
     date=search_date(q,privileged)
     if q:
         if date:
@@ -90,7 +97,8 @@ def save_employee(user,data,id=None):
                 values[key]=current_reference(values[key],model,**conditions)
         obj=get_or_error(m.Employee.objects.select_for_update(),pk=id) if id else m.Employee()
         name=values.get('display_name',obj.display_name)
-        matches=duplicate_names(name,id)
+        # Namesakes matter when a person is created or renamed, not on every unrelated edit.
+        matches=duplicate_names(name,id) if not id or normalize(name)!=obj.normalized_name else []
         if matches and not confirm:
             raise PortalError('DUPLICATE_NAME',409,{'matches':matches})
         manager=values.get('manager',obj.manager if id else None)
@@ -109,6 +117,8 @@ def save_employee(user,data,id=None):
 def archive_employee(user,id,data):
     with domain_write():
         e=get_or_error(m.Employee.objects.select_for_update(),pk=id)
+        if e.status=='ARCHIVED':
+            raise PortalError('CONFLICT',409)
         accounts=m.UserAccount.objects.filter(employee=e,user__is_active=True)
         if accounts.filter(role='ADMIN').exists() and not m.UserAccount.objects.filter(role='ADMIN',user__is_active=True).exclude(employee=e).exists():
             raise PortalError('LAST_ADMIN',409)
@@ -140,7 +150,13 @@ def archive_employee(user,id,data):
 
 def restore_employee(user,id):
     with domain_write():
-        e=get_or_error(m.Employee.objects.select_for_update(),pk=id)
+        e=get_or_error(m.Employee.objects.select_for_update().select_related('unit','office'),pk=id)
+        if e.status!='ARCHIVED':
+            raise PortalError('CONFLICT',409)
+        if not e.unit.active:
+            raise PortalError('UNIT_INACTIVE',409)
+        if not e.office.active:
+            raise PortalError('OFFICE_INACTIVE',409)
         e.status,e.archived_at='ACTIVE',None
         e.save()
         audit(user,'EMPLOYEE_RESTORED','EMPLOYEE',id,['status'])
@@ -171,13 +187,19 @@ def save_unit(user,data,id=None):
             if key in values:
                 values[key]=current_reference(values[key],model,**conditions)
         obj=get_or_error(m.OrgUnit.objects.select_for_update(),pk=id) if id else m.OrgUnit()
-        parent=values.get('parent',obj.parent if id else None)
+        parent=parent_unit=values.get('parent',obj.parent if id else None)
         seen=set()
         while parent:
             if parent.pk==obj.pk or parent.pk in seen:
                 raise PortalError('UNIT_CYCLE')
             seen.add(parent.pk)
             parent=parent.parent
+        active=values.get('active',obj.active if id else True)
+        if active and m.OrgUnit.objects.filter(normalized_name=normalize(values.get('name',obj.name)),active=True).exclude(pk=obj.pk).exists():
+            # Imports resolve a unit by its normalized name among all active units, so that must be unique.
+            raise PortalError('UNIT_ALREADY_EXISTS',409)
+        if active and parent_unit and not parent_unit.active:
+            raise PortalError('UNIT_INACTIVE',409)
         if values.get('active') is False and id and (obj.employees.filter(status='ACTIVE').exists() or obj.children.filter(active=True).exists()):
             raise PortalError('UNIT_IN_USE',409)
         for key,value in values.items():
@@ -192,7 +214,7 @@ def save_office(user,data,id=None):
         obj=get_or_error(m.Office.objects.select_for_update(),pk=id) if id else m.Office()
         if values.get('active') is False and id and obj.employees.filter(status='ACTIVE').exists():
             raise PortalError('OFFICE_IN_USE',409)
-        if 'name' in values and m.Office.objects.filter(normalized_name=normalize(values['name']),active=True).exclude(id=obj.pk).exists():
+        if values.get('active',obj.active if id else True) and m.Office.objects.filter(normalized_name=normalize(values.get('name',obj.name)),active=True).exclude(id=obj.pk).exists():
             raise PortalError('OFFICE_ALREADY_EXISTS',409)
         for key,value in values.items():
             setattr(obj,key,value)
@@ -219,15 +241,15 @@ def news_data(n,full=False):
 def news(user,query):
     qs=m.News.objects.filter(deleted_at=None) if managed(user) and query.get('manage')=='true' else published_news()
     if query.get('q'):
-        q=normalize(str(query['q'])[:200])
-        qs=qs.filter(Q(normalized_title__contains=q)|Q(summary__icontains=query['q']))
+        raw=search_text(query['q'])
+        qs=qs.filter(Q(normalized_title__contains=normalize(raw))|Q(summary__icontains=raw))
     if query.get('pinned')=='true':
         qs=qs.filter(pinned=True)
     if query.get('category'):
         category=query['category']
         # NEWS is the original persisted value; COMPANY is its UI alias.
         qs=qs.filter(category__in=['NEWS','COMPANY']) if category in {'NEWS','COMPANY'} else qs.filter(category=category)
-    return page(qs.select_related('author__portal_account','cover').annotate(view_count=Count('views')).order_by('-published_at','-created_at'),query,news_data)
+    return page(qs.select_related('author__portal_account','cover').annotate(view_count=Count('views')).order_by(F('published_at').desc(nulls_last=True),'-created_at'),query,news_data)
 
 def article(user,id):
     qs=m.News.objects.filter(deleted_at=None) if managed(user) else published_news()
@@ -243,6 +265,8 @@ def save_news(user,data,id=None):
             m.NewsRevision.objects.create(news=obj,edited_by=user,snapshot={'title':obj.title,'summary':obj.summary,'body':obj.body,'language':obj.language,'translations':obj.translations,'status':obj.status,'pinned':obj.pinned})
         for key,value in values.items():
             setattr(obj,key,value)
+        if obj.published_at and obj.expires_at and obj.expires_at<=obj.published_at:
+            raise PortalError('VALIDATION_ERROR',400,{'expiresAt':['Must be later than publishedAt.']})
         if obj.status=='PUBLISHED' and not obj.published_at:
             obj.published_at=timezone.now()
         obj.save()
@@ -284,7 +308,7 @@ def documents(user,query):
             except (TypeError,ValueError):
                 raise PortalError('INVALID_DATE')
             docs=docs.filter(**{lookup:value})
-    q=str(query.get('q',''))[:200]
+    q=search_text(query.get('q',''))
     inside=query.get('inside')=='true'
     if query.get('history')=='true':
         versions=m.DocumentVersion.objects.filter(document__in=docs,file__security_status='APPROVED').select_related('document','file','document__current_version__file')
@@ -403,4 +427,4 @@ def permanent_delete(user,kind,id,confirmation):
     return {'success':True,'storagePurgeQueued':bool(orphan_ids)}
 
 def search(user,q):
-    return {'employees':employees(user,{'q':q,'limit':6}),'news':news(user,{'q':q,'limit':6}),'documents':documents(user,{'q':q,'limit':6}),'units':[u for u in units() if normalize(q) in normalize(u['name'])][:6]}
+    return {'employees':employees(user,{'q':q,'limit':6}),'news':news(user,{'q':q,'limit':6}),'documents':documents(user,{'q':q,'limit':6,'inside':'true'}),'units':[u for u in units() if normalize(q) in normalize(u['name'])][:6]}

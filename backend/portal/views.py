@@ -54,7 +54,7 @@ class EmployeeArchiveView(ManagedView):
     @extend_schema(operation_id='EmployeeArchiveView_post')
     @extend_schema(request=OpenApiTypes.OBJECT,responses=response_for('EmployeeArchiveView','post'))
     def post(self,request,id):
-        if set(request.data)-{'replacementManagerId','confirmDetach'}:
+        if set(request.data)-{'replacementManagerId','confirmDetach'} or not isinstance(request.data.get('confirmDetach',False),bool) or not isinstance(request.data.get('replacementManagerId'),(str,type(None))):
             raise PortalError('VALIDATION_ERROR')
         return Response(svc.archive_employee(request.user,id,request.data))
 
@@ -257,6 +257,9 @@ class ExportView(ManagedView):
             sheet.append(EXPORT_FIELDS)
             for row in data:
                 sheet.append([spreadsheet_safe(v) for v in row])
+                for cell in sheet[sheet.max_row]:
+                    if isinstance(cell.value,str):
+                        cell.data_type='s'
             out=io.BytesIO()
             workbook.save(out)
             response=HttpResponse(out.getvalue(),content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

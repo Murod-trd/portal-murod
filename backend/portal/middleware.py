@@ -23,6 +23,8 @@ class PortalMiddleware:
                     request.META['PORTAL_CLIENT_IP']=str(ipaddress.ip_address(request.headers.get('X-Forwarded-For','')))
                 except ValueError:
                     return self.secure_response(request,JsonResponse({'code':'INVALID_PROXY_HEADER'},status=400))
+        if request.path.startswith('/api/') and any('\x00' in text for key,values in request.GET.lists() for text in [key,*values]):
+            return self.secure_response(request,JsonResponse({'code':'VALIDATION_ERROR'},status=400))
         if request.path.startswith('/api/') and not request.path.startswith('/api/internal/'):
             if request.method not in {'GET','HEAD','OPTIONS'} and (request.user.is_authenticated or request.path=='/api/v1/auth/login'):
                 if request.headers.get('Origin') not in settings.CSRF_TRUSTED_ORIGINS:

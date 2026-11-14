@@ -48,6 +48,14 @@ def upcoming_birthday(birthday, now=None):
         target = occurrence(today.year + 1)
     return {'day': birthday.day, 'month': birthday.month, 'days': (target - today).days}
 
+FORMULA_START = r'^\s*[=+@\-\t\r]'
+PLAIN_PHONE = r'^\+\d[\d ()\-]*$'
+
 def spreadsheet_safe(value):
     value = str(value or '')
-    return "'" + value if re.match(r'^\s*[=+@\-\t\r]', value) else value
+    # Plain phone numbers contain no formula syntax and must survive export -> import unchanged.
+    return "'" + value if re.match(FORMULA_START, value) and not re.fullmatch(PLAIN_PHONE, value) else value
+
+def spreadsheet_restore(value):
+    # Inverse of the neutralising apostrophe (also for files exported before phones were exempted).
+    return value[1:] if value.startswith("'") and re.match(FORMULA_START, value[1:]) else value

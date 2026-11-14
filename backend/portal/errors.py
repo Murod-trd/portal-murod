@@ -28,7 +28,7 @@ def exception_handler(exc, context):
         from rest_framework.response import Response
         return Response({'code':'VALIDATION_ERROR'},status=400)
     from rest_framework.response import Response
-    logging.getLogger('portal').error('Request failed: %s', type(exc).__name__)
+    logging.getLogger('portal').exception('Request failed: %s', type(exc).__name__, exc_info=exc)
     return Response({'code': 'DATABASE_UNAVAILABLE' if isinstance(exc, OperationalError) else 'INTERNAL_ERROR'}, status=503 if isinstance(exc, OperationalError) else 500)
 
 def csrf_failure(request, reason=''):

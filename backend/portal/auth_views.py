@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from .errors import PortalError
 from .models import UserAccount, Employee
-from .security import throttle, audit, domain_write
+from .security import throttle, refund_throttle, audit, domain_write
 from .serializers import StrictSerializer, UserInput, validated
 from .services import get_or_error,current_reference
 
@@ -41,10 +41,13 @@ class LoginView(APIView):
     def post(self,request):
         data=validated(LoginInput,request.data)
         throttle(f'login-ip:{request.META.get("PORTAL_CLIENT_IP",request.META.get("REMOTE_ADDR", "local"))}',600,300)
-        throttle(f'login-user:{data["username"].lower()}',10,300)
+        user_key=f'login-user:{data["username"].lower()}'
+        # Counted before the password check (so parallel guesses cannot exceed the limit) and refunded on success: only failures consume the budget.
+        throttle(user_key,10,300)
         user=authenticate(request=request._request,username=data['username'],password=data['password'])
         if not user or not hasattr(user,'portal_account'):
             raise PortalError('INVALID_CREDENTIALS',401)
+        refund_throttle(user_key)
         login(request._request,user)
         now=time.time()
         request.session['login_at']=now
@@ -69,7 +72,7 @@ class MeView(AccountView):
         return Response({'id':str(request.user.pk),'name':a.display_name,'username':request.user.username,'role':a.role,'employeeId':str(a.employee_id) if a.employee_id else None,'locale':a.locale,'mustChangePassword':requires_password_change(a),'mfaEnrolled':request.user.totpdevice_set.filter(confirmed=True).exists(),'mfaRequired':requires_mfa(a),'mfaVerified':request.user.is_verified(),'csrfToken':get_token(request),'demo':not __import__('django.conf',fromlist=['settings']).settings.PRODUCTION})
     @extend_schema(operation_id='MeView_patch', request=OpenApiTypes.OBJECT, responses=response_for('MeView','patch'))
     def patch(self,request):
-        if set(request.data)-{'locale'} or request.data.get('locale') not in {'uz','ru','en'}:
+        if set(request.data)-{'locale'} or not isinstance(request.data.get('locale'),str) or request.data['locale'] not in {'uz','ru','en'}:
             raise PortalError('VALIDATION_ERROR')
         account=request.user.portal_account
         account.locale=request.data['locale']

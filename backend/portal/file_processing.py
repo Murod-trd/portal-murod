@@ -304,7 +304,9 @@ def parse_import(data,name):
         if len(row)>50 or any(len(str(cell))>2000 for cell in row):
             raise ProcessingError('IMPORT_CELL_LIMIT')
     import json
-    result={'headers':[str(x).strip() for x in rows[0]],'rows':[[str(v) for v in row] for row in rows[1:] if any(str(v).strip() for v in row)]}
+    # rowNumbers keeps the real spreadsheet row of every kept row (blank rows are dropped but still counted).
+    kept=[(number,row) for number,row in enumerate(rows[1:],start=2) if any(str(v).strip() for v in row)]
+    result={'headers':[str(x).strip() for x in rows[0]],'rows':[[str(v) for v in row] for _,row in kept],'rowNumbers':[number for number,_ in kept]}
     if len(json.dumps(result).encode())>4*1024*1024:
         raise ProcessingError('IMPORT_RESULT_LIMIT')
     return result

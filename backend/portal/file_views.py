@@ -14,7 +14,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import FileResponse
 from django.utils import timezone
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -152,6 +152,7 @@ class ReprocessView(APIView):
         return Response({'success':True})
 
 class WorkerView(APIView):
+    parser_classes=[JSONParser]
     authentication_classes=[]
     permission_classes=[AllowAny]
     def worker_access(self,request):
@@ -300,7 +301,10 @@ class WorkerResultView(WorkerView):
             elif job.kind=='PARSE_IMPORT':
                 if not isinstance(result.get('headers'),list) or not isinstance(result.get('rows'),list) or len(result['rows'])>2000 or len(result['headers'])>50:
                     raise PortalError('INVALID_IMPORT_RESULT')
-                file.parsed_data={'headers':result['headers'],'rows':result['rows']}
+                numbers=result.get('rowNumbers')
+                if numbers is not None and (not isinstance(numbers,list) or len(numbers)!=len(result['rows']) or any(type(v) is not int or v<2 for v in numbers) or numbers!=sorted(set(numbers))):
+                    raise PortalError('INVALID_IMPORT_RESULT')
+                file.parsed_data={'headers':result['headers'],'rows':result['rows'],**({'rowNumbers':numbers} if numbers is not None else {})}
                 file.save(update_fields=['parsed_data'])
                 job.status='DONE'
             job.finished_at=timezone.now()

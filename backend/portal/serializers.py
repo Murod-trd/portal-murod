@@ -1,10 +1,31 @@
+import datetime as dt
+import unicodedata
 from collections.abc import Mapping
 import bleach
+from django.utils import timezone
 from rest_framework import serializers as s
 from . import models as m
 
 def html(value):
     return bleach.clean(value, tags=['p','br','strong','em','u','ul','ol','li','h2','h3','blockquote','a'], attributes={'a':['href','title']}, protocols=['https','mailto'], strip=True)
+
+BIDI_CONTROLS=set('\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069')
+
+def validate_person_name(value):
+    if any(unicodedata.category(ch)=='Cc' or ch in BIDI_CONTROLS for ch in value):
+        raise s.ValidationError('Control and bidirectional override characters are not allowed.')
+
+def validate_phone(value):
+    if value and sum(ch in '0123456789' for ch in value)<5:
+        raise s.ValidationError('A phone number needs at least 5 digits.')
+
+def validate_birthday(value):
+    if not dt.date(1900,1,1)<=value<=timezone.localdate():
+        raise s.ValidationError('Birthday must be between 1900 and today.')
+
+def validate_document_date(value):
+    if not dt.date(1990,1,1)<=value<=dt.date(2100,12,31):
+        raise s.ValidationError('Date must be between 1990 and 2100.')
 
 class StrictSerializer(s.Serializer):
     def to_internal_value(self, data):
@@ -16,16 +37,16 @@ class StrictSerializer(s.Serializer):
         return super().to_internal_value(data)
 
 class EmployeeInput(StrictSerializer):
-    displayName = s.CharField(source='display_name', max_length=200, min_length=2)
+    displayName = s.CharField(source='display_name', max_length=200, min_length=2, validators=[validate_person_name])
     positionTitle = s.CharField(source='position_title', max_length=200)
     unitId = s.PrimaryKeyRelatedField(source='unit', queryset=m.OrgUnit.objects.filter(active=True))
     officeId = s.PrimaryKeyRelatedField(source='office', queryset=m.Office.objects.filter(active=True))
     managerId = s.PrimaryKeyRelatedField(source='manager', queryset=m.Employee.objects.filter(status='ACTIVE'), allow_null=True, required=False)
-    extension = s.CharField(max_length=30, allow_blank=True, required=False)
-    workEmail = s.EmailField(source='work_email', allow_blank=True, required=False)
-    mobilePhone = s.RegexField(source='mobile_phone', regex=r'^[+\d()\-\s]*$', max_length=40, allow_blank=True, required=False)
+    extension = s.RegexField(regex=r'^[0-9]+$', max_length=30, allow_blank=True, required=False)
+    workEmail = s.EmailField(source='work_email', max_length=254, allow_blank=True, required=False)
+    mobilePhone = s.RegexField(source='mobile_phone', regex=r'^[+\d()\-\s]*$', max_length=40, allow_blank=True, required=False, validators=[validate_phone])
     mobileVisible = s.BooleanField(source='mobile_visible', required=False)
-    birthday = s.DateField(allow_null=True, required=False)
+    birthday = s.DateField(allow_null=True, required=False, validators=[validate_birthday])
     birthdayVisible = s.BooleanField(source='birthday_visible', required=False)
     photoFileId = s.PrimaryKeyRelatedField(source='photo', queryset=m.FileObject.objects.filter(purpose='PHOTO',security_status='APPROVED'), allow_null=True, required=False)
     floor = s.CharField(max_length=30, allow_blank=True, required=False)
@@ -33,7 +54,7 @@ class EmployeeInput(StrictSerializer):
     confirmNamesake = s.BooleanField(source='confirm_namesake', required=False, default=False)
 
 class SelfContact(StrictSerializer):
-    mobilePhone = s.RegexField(source='mobile_phone', regex=r'^[+\d()\-\s]*$', max_length=40, allow_blank=True, required=False)
+    mobilePhone = s.RegexField(source='mobile_phone', regex=r'^[+\d()\-\s]*$', max_length=40, allow_blank=True, required=False, validators=[validate_phone])
     mobileVisible = s.BooleanField(source='mobile_visible', required=False)
 
 class SelfLocation(StrictSerializer):
@@ -73,6 +94,18 @@ class Translations(s.DictField):
             result[locale]=ser.validated_data
         return result
 
+class BoundedDateTimeField(s.DateTimeField):
+    """Rejects instants outside 2000-2100 (and values that overflow timezone conversion) with a 400."""
+    def to_internal_value(self,value):
+        try:
+            result=super().to_internal_value(value)
+            valid=2000<=result.astimezone(dt.timezone.utc).year<=2100
+        except (OverflowError,ValueError):
+            valid=False
+        if not valid:
+            raise s.ValidationError('Date is outside the supported range.')
+        return result
+
 class NewsInput(StrictSerializer):
     title = s.CharField(max_length=300)
     summary = s.CharField(max_length=1000, allow_blank=True, required=False, default='')
@@ -83,8 +116,12 @@ class NewsInput(StrictSerializer):
     coverFileId = s.PrimaryKeyRelatedField(source='cover', queryset=m.FileObject.objects.filter(purpose='COVER',security_status='APPROVED'), allow_null=True, required=False)
     status = s.ChoiceField(choices=['DRAFT','PUBLISHED'], required=False, default='DRAFT')
     pinned = s.BooleanField(required=False, default=False)
-    publishedAt = s.DateTimeField(source='published_at',allow_null=True,required=False)
-    expiresAt = s.DateTimeField(source='expires_at',allow_null=True,required=False)
+    publishedAt = BoundedDateTimeField(source='published_at',allow_null=True,required=False)
+    expiresAt = BoundedDateTimeField(source='expires_at',allow_null=True,required=False)
+    def validate(self,attrs):
+        if attrs.get('published_at') and attrs.get('expires_at') and attrs['expires_at']<=attrs['published_at']:
+            raise s.ValidationError({'expiresAt':'Must be later than publishedAt.'})
+        return attrs
     def validate_body(self,value):
         result=html(value)
         if not bleach.clean(result,tags=[],strip=True).strip():
@@ -94,8 +131,8 @@ class NewsInput(StrictSerializer):
 class DocumentInput(StrictSerializer):
     title = s.CharField(max_length=300)
     number = s.CharField(max_length=80,allow_blank=True,required=False,default='')
-    documentDate = s.DateField(source='document_date',allow_null=True,required=False)
-    effectiveDate = s.DateField(source='effective_date',allow_null=True,required=False)
+    documentDate = s.DateField(source='document_date',allow_null=True,required=False,validators=[validate_document_date])
+    effectiveDate = s.DateField(source='effective_date',allow_null=True,required=False,validators=[validate_document_date])
     category = s.CharField(max_length=80)
     description = s.CharField(max_length=4000,allow_blank=True,required=False,default='')
     language = s.ChoiceField(choices=['uz','ru'],required=False,default='uz')
@@ -106,8 +143,8 @@ class DocumentInput(StrictSerializer):
 class VersionInput(StrictSerializer):
     fileId = s.PrimaryKeyRelatedField(source='file',queryset=m.FileObject.objects.filter(purpose='DOCUMENT',security_status='APPROVED'))
     label = s.CharField(max_length=80)
-    documentDate = s.DateField(source='document_date',allow_null=True,required=False)
-    effectiveDate = s.DateField(source='effective_date',allow_null=True,required=False)
+    documentDate = s.DateField(source='document_date',allow_null=True,required=False,validators=[validate_document_date])
+    effectiveDate = s.DateField(source='effective_date',allow_null=True,required=False,validators=[validate_document_date])
     changeNote = s.CharField(source='change_note',max_length=1000,allow_blank=True,required=False,default='')
 
 class UserInput(StrictSerializer):
