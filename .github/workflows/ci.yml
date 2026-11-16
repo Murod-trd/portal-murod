@@ -1,0 +1,68 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      APP_ENV: test
+      DB_ENGINE: postgres
+      POSTGRES_HOST: localhost
+      POSTGRES_DB: portal_acceptance
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ci-only-password
+      PORTAL_RUNTIME_DIR: /tmp/portal-runtime
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.lock
+      - name: Install locked dependencies
+        run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+      - name: Generate a throwaway secret key
+        run: echo "DJANGO_SECRET_KEY=$(python -c 'import secrets;print(secrets.token_urlsafe(48))')" >> "$GITHUB_ENV"
+      - name: Django checks and migration drift
+        run: |
+          python backend/manage.py check
+          python backend/manage.py makemigrations --check --dry-run
+      - name: Lint (errors only)
+        run: ruff check --select E9,F backend operations scripts
+      - name: Tests on PostgreSQL
+        run: python -m pytest backend/tests -q -rs -p no:cacheprovider
+      - name: Packager tests
+        run: python -m unittest operations.test_package_release
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: node scripts/test_frontend_audit.mjs
+      - run: npm run build:web
