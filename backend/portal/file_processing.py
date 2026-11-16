@@ -19,6 +19,88 @@ class ProcessingError(Exception):
         self.code=code
         super().__init__(code)
 
+# Scanned pages uploaded as plain images (purpose DOCUMENT). The original bytes stay
+# stored unchanged; only the sandboxed worker decodes them.
+SCAN_EXTENSIONS={'.jpg':'JPEG','.jpeg':'JPEG','.png':'PNG','.tif':'TIFF','.tiff':'TIFF'}
+SCAN_MODES={'1','L','LA','P','PA','RGB','RGBA','CMYK','YCbCr'}
+SCAN_MAX_PIXELS=40_000_000        # per page: A0 at 150 dpi is ~46 MP, A3 at 300 dpi ~17 MP
+SCAN_MAX_SIDE=12_000
+SCAN_MAX_TOTAL_PIXELS=800_000_000  # 80 A4 pages at 300 dpi are ~700 MP
+SCAN_OCR_SIDE=3508                 # longest side handed to OCR (A4 at 300 dpi)
+SCAN_MIN_UPSCALE_SIDE=1400         # smaller rasters are enlarged 2x for OCR
+DOCX_IMAGE_LIMITS={'count':20,'bytes':10*1024*1024,'total':30*1024*1024,'min_side':40,'min_pixels':20_000}
+
+def scan_frames(data,extension,max_pages,first_only=False):
+    """Open an uploaded raster under explicit limits; returns (page count, iterator of decoded frames).
+
+    The format must match the extension (Pillow is restricted to that decoder), the pixel count is
+    checked from the header before any pixel is decoded, and every frame is fully decoded so a
+    truncated file fails here. Used by the sandboxed worker only."""
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS=SCAN_MAX_PIXELS
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error',Image.DecompressionBombWarning)
+            image=Image.open(io.BytesIO(data),formats=[SCAN_EXTENSIONS[extension]])
+    except (Image.DecompressionBombError,Image.DecompressionBombWarning,MemoryError) as error:
+        raise ProcessingError('IMAGE_LIMIT') from error
+    except Image.UnidentifiedImageError as error:
+        raise ProcessingError('TYPE_MISMATCH') from error
+    except Exception as error:
+        raise ProcessingError('INVALID_IMAGE') from error
+    count=getattr(image,'n_frames',1)
+    if first_only:
+        count=1
+    elif count>1 and image.format!='TIFF':
+        raise ProcessingError('UNSUPPORTED_FORMAT')  # animated PNG
+    if count>max_pages:
+        raise ProcessingError('PAGE_LIMIT')
+    def frames():
+        total=0
+        for index in range(count):
+            try:
+                image.seek(index)
+                width,height=image.size
+                if image.mode not in SCAN_MODES:
+                    raise ProcessingError('UNSUPPORTED_FORMAT')
+                if width<1 or height<1 or width>SCAN_MAX_SIDE or height>SCAN_MAX_SIDE or width*height>SCAN_MAX_PIXELS:
+                    raise ProcessingError('IMAGE_LIMIT')
+                total+=width*height
+                if total>SCAN_MAX_TOTAL_PIXELS:
+                    raise ProcessingError('IMAGE_LIMIT')
+                image.load()
+            except ProcessingError:
+                raise
+            except MemoryError as error:
+                raise ProcessingError('IMAGE_LIMIT') from error
+            except Exception as error:
+                raise ProcessingError('INVALID_IMAGE') from error
+            yield image
+    return count,frames()
+
+def normalise_scan(frame):
+    """Decoded frame -> grayscale page raster for OCR (EXIF orientation applied, transparency on white)."""
+    from PIL import Image,ImageOps
+    page=ImageOps.exif_transpose(frame)
+    if page.mode in {'P','PA','LA','RGBA'}:
+        page=page.convert('RGBA')
+        white=Image.new('RGB',page.size,(255,255,255))
+        white.paste(page,mask=page.getchannel('A'))
+        page=white
+    page=page.convert('L')
+    longest=max(page.size)
+    if longest>SCAN_OCR_SIDE:
+        page.thumbnail((SCAN_OCR_SIDE,SCAN_OCR_SIDE),Image.LANCZOS)
+    elif longest<SCAN_MIN_UPSCALE_SIDE:
+        page=page.resize((page.width*2,page.height*2),Image.LANCZOS)
+    return page
+
+def inspect_scan_image(data,extension,max_pages):
+    count,frames=scan_frames(data,extension,max_pages)
+    for _ in frames:
+        pass
+    return count
+
 def _response(sock):
     data=b''
     while len(data)<8192:
@@ -86,7 +168,7 @@ def validate_zip(data):
 def validate_structure(data,name,purpose):
     import filetype
     extension=Path(name).suffix.lower()
-    allowed={'DOCUMENT':{'.pdf','.docx'},'IMPORT':{'.csv','.xlsx'},'PHOTO':{'.jpg','.jpeg','.png','.webp'},'COVER':{'.jpg','.jpeg','.png','.webp'}}
+    allowed={'DOCUMENT':{'.pdf','.docx'}|set(SCAN_EXTENSIONS),'IMPORT':{'.csv','.xlsx'},'PHOTO':{'.jpg','.jpeg','.png','.webp'},'COVER':{'.jpg','.jpeg','.png','.webp'}}
     if extension not in allowed.get(purpose,set()):
         raise ProcessingError('UNSUPPORTED_FORMAT')
     if extension=='.csv':
@@ -106,7 +188,7 @@ def validate_structure(data,name,purpose):
             raise ProcessingError('TYPE_MISMATCH')
         return 'application/vnd.openxmlformats-officedocument.'+('spreadsheetml.sheet' if extension=='.xlsx' else 'wordprocessingml.document')
     detected=filetype.guess(data)
-    expected={'.pdf':'application/pdf','.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp'}[extension]
+    expected={'.pdf':'application/pdf','.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp','.tif':'image/tiff','.tiff':'image/tiff'}[extension]
     if not detected or detected.mime!=expected:
         raise ProcessingError('TYPE_MISMATCH')
     return expected
@@ -180,6 +262,8 @@ def inspect_clean_file(data,name,purpose,max_pages):
         inspect_office(data)
         from docx import Document
         Document(io.BytesIO(data))
+    if purpose=='DOCUMENT' and Path(name).suffix.lower() in SCAN_EXTENSIONS:
+        inspect_scan_image(data,Path(name).suffix.lower(),max_pages)
     output={'mimeType':mime}
     if purpose in {'PHOTO','COVER'}:
         from PIL import Image
@@ -203,46 +287,157 @@ def scan_file(data,name,purpose,host,port,max_pages):
     if output.get('cleanedBase64'):clamav_scan(base64.b64decode(output['cleanedBase64'],validate=True),host,port)
     return {**output,**info,'status':'APPROVED'}
 
+def ocr_languages_ready(languages):
+    result=subprocess.run(['tesseract','--list-langs'],capture_output=True,text=True,timeout=15,check=True)
+    if set(languages.split('+'))-set(result.stdout.splitlines()[1:]):
+        raise ProcessingError('OCR_LANGUAGES_UNAVAILABLE')
+
+class OcrRun:
+    """One file's OCR: shared time budget, orientation memory across pages and quality totals."""
+    PAGE_RESERVE=15  # seconds kept for each page still to come before optional retries stop
+    def __init__(self,languages,total_pages):
+        self.languages,self.left,self.deadline=languages,total_pages,time.monotonic()+500
+        self.state,self.quality_pages,self.attempted,self.checked={},[],0,False
+    def page(self,image):
+        """Recognise one page raster; None when it holds no text."""
+        from .ocr import ocr_page,OcrFailure
+        if not self.checked:
+            ocr_languages_ready(self.languages)
+            self.checked=True
+        self.left-=1
+        try:
+            result=ocr_page(image,self.languages,self.deadline,self.state,self.deadline-self.PAGE_RESERVE*(self.left+1))
+        except OcrFailure as error:
+            raise ProcessingError(str(error)) from error
+        self.attempted+=1
+        if result:
+            self.quality_pages.append(result['quality'])
+        return result
+    def quality(self,**extra):
+        pages=self.quality_pages
+        scored=[q for q in pages if q['lineCount']]
+        rotations=[q['rotation'] for q in pages]
+        value={'engine':'tesseract-script-ensemble','ocrPages':self.attempted,
+               'meanConfidence':round(sum(q['meanConfidence'] for q in scored)/len(scored),2) if scored else None,
+               'lowConfidenceLines':sum(q['lowConfidenceLines'] for q in pages),
+               'profiles':list(dict.fromkeys(profile for q in pages for profile in q['profiles'])),
+               'rotatedPages':sum(r!=0 for r in rotations),'sparsePages':sum(q['sparse'] for q in pages)}
+        if value['rotatedPages']:
+            value['rotations']=rotations
+        return {**value,**extra}
+
+def docx_pictures(document):
+    """Embedded raster pictures of the document body in order: bounded, deduplicated, no vector formats."""
+    namespace='{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
+    kinds={'image/png':'.png','image/jpeg':'.jpg','image/tiff':'.tif'}
+    limits,seen,result,total=DOCX_IMAGE_LIMITS,set(),[],0
+    for element in document.element.body.iter():
+        if not str(element.tag).endswith('}blip'):
+            continue
+        relation=element.get(namespace+'embed')
+        if not relation or relation in seen:
+            continue
+        seen.add(relation)
+        part=document.part.related_parts.get(relation)
+        if part is None or part.content_type not in kinds:
+            continue
+        blob=part.blob
+        if len(blob)>limits['bytes'] or total+len(blob)>limits['total']:
+            continue
+        total+=len(blob)
+        result.append((kinds[part.content_type],blob))
+        if len(result)>=limits['count']:
+            break
+    return result
+
+def extract_docx(data,languages):
+    from docx import Document
+    validate_zip(data)
+    doc=Document(io.BytesIO(data))
+    parts=[p.text for p in doc.paragraphs]
+    parts.extend(' | '.join(cell.text for cell in row.cells) for table in doc.tables for row in table.rows)
+    text='\n'.join(parts)
+    if len(text)>2_000_000:
+        raise ProcessingError('TEXT_LIMIT')
+    pictures=docx_pictures(doc)
+    if not pictures:
+        return {'text':text,'pages':None}
+    run=OcrRun(languages,len(pictures))
+    picture_texts,search_parts=[],[]
+    with tempfile.TemporaryDirectory(prefix='portal-docx-ocr-') as folder:
+        for index,(extension,blob) in enumerate(pictures):
+            try:
+                _,frames=scan_frames(blob,extension,1,first_only=True)
+                frame=next(frames)
+            except ProcessingError:
+                run.left-=1
+                continue  # undecodable or oversized pictures are ignored; the DOCX itself stays valid
+            width,height=frame.size
+            if min(width,height)<DOCX_IMAGE_LIMITS['min_side'] or width*height<DOCX_IMAGE_LIMITS['min_pixels']:
+                run.left-=1
+                continue
+            path=Path(folder)/f'picture-{index}.png'
+            normalise_scan(frame).save(path)
+            result=run.page(path)
+            path.unlink(missing_ok=True)
+            if result:
+                if result['text'].strip():
+                    picture_texts.append(result['text'])
+                search_parts.append(result['searchText'])
+    if picture_texts:
+        text=(text.rstrip()+'\n\n' if text.strip() else '')+'\n\n'.join(picture_texts)
+    if len(text)>2_000_000:
+        raise ProcessingError('TEXT_LIMIT')
+    output={'text':text,'pages':None}
+    if run.attempted:
+        output.update(searchText='\n'.join(search_parts),quality=run.quality(embeddedImages=run.attempted))
+    return output
+
+def extract_image(data,extension,languages,max_pages):
+    count,frames=scan_frames(data,extension,max_pages)
+    run=OcrRun(languages,count)
+    texts,search_parts=[],[]
+    with tempfile.TemporaryDirectory(prefix='portal-ocr-') as folder:
+        for index,frame in enumerate(frames):
+            path=Path(folder)/f'page-{index}.png'
+            normalise_scan(frame).save(path)  # normalised raster; the stored original is never modified
+            result=run.page(path)
+            path.unlink(missing_ok=True)
+            texts.append(result['text'] if result else '')
+            if result:
+                search_parts.append(result['searchText'])
+            if sum(map(len,texts))>2_000_000:
+                raise ProcessingError('TEXT_LIMIT')
+    if not run.quality_pages:
+        raise ProcessingError('OCR_NO_TEXT')
+    return {'text':'\n\n'.join(texts),'searchText':'\n'.join(search_parts),'pages':count,'quality':run.quality()}
+
 def extract_text(data,name,languages,max_pages):
     if name.lower().endswith('.docx'):
-        from docx import Document
-        validate_zip(data)
-        doc=Document(io.BytesIO(data))
-        parts=[p.text for p in doc.paragraphs]
-        parts.extend(' | '.join(cell.text for cell in row.cells) for table in doc.tables for row in table.rows)
-        text='\n'.join(parts)
-        if len(text)>2_000_000:
-            raise ProcessingError('TEXT_LIMIT')
-        return {'text':text,'pages':None}
+        return extract_docx(data,languages)
+    if Path(name.lower()).suffix in SCAN_EXTENSIONS:
+        return extract_image(data,Path(name.lower()).suffix,languages,max_pages)
     reader=pdf_reader(data,max_pages)
     texts=[]
     search_parts=[]
-    quality_pages=[]
-    deadline=time.monotonic()+500
+    run=OcrRun(languages,len(reader.pages))
     with tempfile.TemporaryDirectory(prefix='portal-ocr-') as folder:
         source=Path(folder)/'source.pdf'
         source.write_bytes(data)
-        available=None
         for index,page in enumerate(reader.pages):
             text=page.extract_text() or ''
             # A long searchable header does not mean the scan below it has a text layer.
             # Keep embedded text and OCR image-bearing pages, including mixed pages.
             if not text.strip() or len(page.images)>0:
-                if available is None:
-                    result=subprocess.run(['tesseract','--list-langs'],capture_output=True,text=True,timeout=15,check=True)
-                    available=set(result.stdout.splitlines()[1:])
-                if set(languages.split('+'))-available:
-                    raise ProcessingError('OCR_LANGUAGES_UNAVAILABLE')
                 output=Path(folder)/f'page-{index}'
+                if not run.checked:
+                    ocr_languages_ready(languages)
+                    run.checked=True
                 subprocess.run(['pdftoppm','-f',str(index+1),'-l',str(index+1),'-singlefile','-r','300','-scale-to','3000','-png',str(source),str(output)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=45,check=True)
-                from .ocr import recognize,OcrFailure
-                try:
-                    result=recognize(Path(str(output)+'.png'),languages,deadline)
-                except OcrFailure as error:
-                    raise ProcessingError(str(error)) from error
-                ocr=result['text']
-                search_parts.append(result['searchText'])
-                quality_pages.append(result['quality'])
+                result=run.page(Path(str(output)+'.png'))
+                ocr=result['text'] if result else ''
+                if result:
+                    search_parts.append(result['searchText'])
                 if text.strip():
                     known={line.strip().casefold() for line in text.splitlines() if line.strip()}
                     additional=[line for line in ocr.splitlines() if line.strip() and line.strip().casefold() not in known]
@@ -251,15 +446,14 @@ def extract_text(data,name,languages,max_pages):
                 else:
                     text=ocr
                 Path(str(output)+'.png').unlink(missing_ok=True)
+            else:
+                run.left-=1
             texts.append(text)
             if sum(map(len,texts))>2_000_000:
                 raise ProcessingError('TEXT_LIMIT')
-    return {'text':'\n\n'.join(texts),'searchText':'\n'.join(search_parts),
-            'pages':len(reader.pages),
-            'quality':{'engine':'tesseract-script-ensemble','ocrPages':len(quality_pages),
-                       'meanConfidence':round(sum(q['meanConfidence'] for q in quality_pages)/len(quality_pages),2) if quality_pages else None,
-                       'lowConfidenceLines':sum(q['lowConfidenceLines'] for q in quality_pages),
-                       'profiles':list(dict.fromkeys(profile for q in quality_pages for profile in q['profiles']))}}
+    if run.attempted and not run.quality_pages and not any(t.strip() for t in texts):
+        raise ProcessingError('OCR_NO_TEXT')  # scanned pages without any recognisable text
+    return {'text':'\n\n'.join(texts),'searchText':'\n'.join(search_parts),'pages':len(reader.pages),'quality':run.quality()}
 
 def parse_import(data,name):
     rows=[]

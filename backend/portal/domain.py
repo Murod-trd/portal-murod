@@ -13,7 +13,9 @@ def normalize(value):
 
 def search_fold(value):
     # A search alias only: original extracted text and downloaded bytes stay unchanged.
-    return normalize(value).translate(str.maketrans({'ö':'o','ğ':'g','ş':'s','ç':'c','ў':'у','қ':'к','ғ':'г','ҳ':'х'}))
+    # Ø/⌀ (diameter on drawings) fold to o together with the Uzbek ö, so a query typed
+    # either way finds text that OCR rendered as Ø, ⌀, O or Ö.
+    return normalize(value).translate(str.maketrans({'ö':'o','ğ':'g','ş':'s','ç':'c','ў':'у','қ':'к','ғ':'г','ҳ':'х','ø':'o','⌀':'o'}))
 
 def initials(value):
     return ''.join(x[0] for x in str(value).split()[:2]).upper()
