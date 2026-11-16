@@ -29,9 +29,11 @@ ROTATION_MARGIN = 1.5
 ROTATION_MIN_SCORE = 8
 ROTATIONS = (0, 90, 180, 270)
 # Pages with fewer main-pass words than this get a sparse-text pass; very sparse
-# pages (drawings) are additionally read sideways. Dense pages never pay for it.
+# pages whose ink is mostly not text (drawings) are additionally read sideways.
+# Dense pages never pay for it.
 SPARSE_WORDS = 60
 VERY_SPARSE_WORDS = 20
+GRAPHIC_INK = 0.004
 SPARSE_MIN_CONFIDENCE = 60
 SPARSE_MAX_LINES = 400
 # Pages that already read as blank paper are not worth orientation retries.
@@ -230,6 +232,23 @@ class Views:
         return sum(histogram[:128]) < BLANK_DARK_FRACTION*max(1, sum(histogram))
 
 
+def graphic_ink(image, boxes):
+    """Fraction of the page covered by dark pixels outside the recognised text lines (drawing lines,
+    shapes, stamps). Plain text pages score near zero; technical drawings do not."""
+    from PIL import Image, ImageChops, ImageDraw
+    with Image.open(image) as source:
+        gray = source.convert('L')
+        scale = min(1.0, 800/max(gray.size))
+        gray = gray.resize((max(1, int(gray.width*scale)), max(1, int(gray.height*scale))))
+    ink = gray.point(lambda value: 255 if value < 128 else 0)
+    mask = Image.new('L', gray.size, 0)
+    draw = ImageDraw.Draw(mask)
+    for left, top, width, height in boxes:
+        draw.rectangle((left*scale-2, top*scale-2, (left+width)*scale+2, (top+height)*scale+2), fill=255)
+    outside = ImageChops.subtract(ink, mask).histogram()[255]
+    return outside/max(1, gray.width*gray.height)
+
+
 def choose_rotation(order, results):
     """results: rotation -> (rows, stats). Upright is kept unless another rotation is clearly better."""
     best = max(results, key=lambda r: (results[r][1]['score'], r == order[0]))
@@ -241,10 +260,10 @@ def choose_rotation(order, results):
     return best
 
 
-def sparse_lines(views, rotation, languages, deadline, probe_deadline, words):
+def sparse_lines(views, rotation, languages, deadline, probe_deadline, sideways):
     """Sparse-text recognition (psm 11) of the corrected page and, for very sparse pages, its sideways views."""
     found = []
-    angles = [rotation]+([(rotation+90) % 360, (rotation+270) % 360] if words < VERY_SPARSE_WORDS else [])
+    angles = [rotation]+([(rotation+90) % 360, (rotation+270) % 360] if sideways else [])
     for angle in angles:
         if probe_deadline is not None and time.monotonic() > probe_deadline:
             break
@@ -294,7 +313,13 @@ def ocr_page(image, languages, deadline, state=None, probe_deadline=None):
         extra = []
         if (stats['words'] < SPARSE_WORDS and (probe_deadline is None or time.monotonic() <= probe_deadline)
                 and not (stats['words'] == 0 and views.blank())):
-            extra = sparse_lines(views, chosen, languages, deadline, probe_deadline, stats['words'])
+            sideways = False
+            if stats['words'] < VERY_SPARSE_WORDS:
+                try:
+                    sideways = graphic_ink(views.path(chosen), [line['box'] for line in rows]) >= GRAPHIC_INK
+                except OSError:
+                    sideways = False
+            extra = sparse_lines(views, chosen, languages, deadline, probe_deadline, sideways)
             quality['sparse'] = True
     # Orientation memory for the following pages of the same file.
     if chosen != 0:

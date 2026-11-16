@@ -388,6 +388,18 @@ def test_sparse_words_reach_the_search_index_only(monkeypatch, page_file):
     assert all(call[0] != 'page.png' for call in sparse_calls)  # plain copies without the resolution tag
 
 
+def test_text_only_sparse_page_is_not_read_sideways(monkeypatch, tmp_path):
+    path = tmp_path / 'text.png'
+    Image.new('L', (400, 300), 255).save(path)  # no ink outside the recognised lines
+    calls = []
+    def passes(image, profile, deadline, psm=3):
+        calls.append(psm)
+        return rows('Certificate of registration number 5', 92) if psm == 3 else []
+    monkeypatch.setattr(ocr, 'run_pass', passes)
+    result = ocr.ocr_page(path, 'eng', far())
+    assert result['quality']['sparse'] is True and calls.count(11) == 1
+
+
 def test_dense_pages_do_not_run_the_sparse_pass(monkeypatch, page_file):
     recogniser = Recogniser()
     monkeypatch.setattr(ocr, 'run_pass', recogniser)
