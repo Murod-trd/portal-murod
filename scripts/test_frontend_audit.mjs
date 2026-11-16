@@ -27,6 +27,7 @@ assert.equal(locales.readLocalePreference(()=>'ru'),'ru');
 assert.equal(locales.readLocalePreference(()=>'en'),'en');
 assert.equal(locales.chooseLocale('en','uz'),'en');
 assert.equal(dateFormat.formatPortalDate(new Date('2026-11-02T21:30:00Z'),'en',true),'3 November 2026');
+const validation=module('validation.ts',()=>({}));
 const english=module('i18n.en.ts',()=>({})).en;
 const i18n=module('i18n.ts',name=>name==='./i18n.en'?{en:english}:{});
 assert.deepEqual(Object.keys(english).sort(),Object.keys(i18n.ru).sort());
@@ -46,7 +47,7 @@ function harness(apiCall,data=null){
   react.useCallback=fn=>fn;react.lazy=()=>()=>null;
   const window={confirm:()=>false,addEventListener(){},removeEventListener(){}};
   let components;
-  const require=name=>name==='react'?react:name==='react/jsx-runtime'?{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})}:name==='./api'?{...api,api:apiCall}:name==='./context'?{usePortal:()=>({t:k=>k,locale:'ru',open(){},onSaved(){}})}:name==='./i18n'?{errorText:k=>k}:name==='./ui'?components:name==='./date-format'?dateFormat:name==='./form-utils'?dates:name==='./hooks'?{useData:()=>({data,loading:false,error:null})}:name==='react-router-dom'?{useNavigate:()=>()=>{}}:new Proxy({},{get:(_,key)=>key});
+  const require=name=>name==='react'?react:name==='react/jsx-runtime'?{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})}:name==='./api'?{...api,api:apiCall}:name==='./context'?{usePortal:()=>({t:k=>k,locale:'ru',open(){},onSaved(){}})}:name==='./i18n'?{errorText:k=>k}:name==='./ui'?components:name==='./date-format'?dateFormat:name==='./form-utils'?dates:name==='./validation'?validation:name==='./hooks'?{useData:()=>({data,loading:false,error:null})}:name==='react-router-dom'?{useNavigate:()=>()=>{}}:new Proxy({},{get:(_,key)=>key});
   components=module('ui.tsx',require,{setTimeout:fn=>{timers.set(++id,fn);return id;},clearTimeout:n=>timers.delete(n),window,document:{activeElement:null}});
   const forms=module('forms.tsx',require);
   return {components,forms,window,render(fn,props){cursor=0;const tree=fn(props);while(effects.length)effects.shift()();return tree;},async tick(){const pending=[...timers.values()];timers.clear();for(const fn of pending)await fn();}};
@@ -122,4 +123,68 @@ assert.deepEqual(dates.splitSnippet('a needle b',[2,8]),['a ','needle',' b']);
 for(const bad of [undefined,[],[3],[5,5],[-1,2],[2,99],[1.5,3]])assert.equal(dates.splitSnippet('a needle b',bad),null,'untrusted match ranges fall back to plain text');
 const marked=h.components.Snippet({text:'x <b>needle</b> y',match:[2,5]});
 assert.equal(find(marked,n=>n.type==='mark').props.children,'<b>','snippet text stays a React text node, never markup');
-console.log('PASS: API responses; locale across login/MFA; Tashkent dates and birthday input; upload races/retry; versions/import; news dates; picker ARIA; close guards. Component logic only, not browser E2E.');
+// --- oversize upload: nginx's own 413 page is not JSON; the uploader refuses before sending ---
+try{
+  globalThis.fetch=async()=>new Response('<html>413 Request Entity Too Large</html>',{status:413,headers:{'Content-Type':'text/html'}});
+  await assert.rejects(api.api('/files','POST',new FormData()),e=>e instanceof api.ApiError&&e.code==='UPLOAD_SIZE_LIMIT'&&e.status===413);
+  globalThis.fetch=async()=>new Response('<html>502</html>',{status:502});
+  await assert.rejects(api.api('/test'),e=>e.code==='INVALID_RESPONSE');
+  globalThis.fetch=async()=>new Response(JSON.stringify({code:'VALIDATION_ERROR',details:{birthday:['Date has wrong format.']},fieldCodes:{birthday:['invalid']}}),{status:400});
+  await assert.rejects(api.api('/test'),e=>e.code==='VALIDATION_ERROR'&&e.fieldCodes.birthday[0]==='invalid');
+} finally {globalThis.fetch=originalFetch;}
+let sent=[];
+const big=harness(async(path,method)=>{sent.push(method+' '+path);return {id:'X',securityStatus:'QUARANTINED'};});
+const bigProps={purpose:'DOCUMENT',onReset(){},onReady(){}};
+tree=big.render(big.components.UploadBox,bigProps);
+const huge=new File([new Uint8Array(20*1024*1024+1)],'huge.pdf');
+find(tree,n=>n.type==='input').props.onChange({target:{files:[huge],value:'x'}});
+await new Promise(resolve=>setImmediate(resolve));
+tree=big.render(big.components.UploadBox,bigProps);
+assert.deepEqual(sent,[],'a file over the displayed limit is never sent');
+assert.equal(find(tree,n=>n.type===big.components.ErrorPanel).props.error.code,'UPLOAD_SIZE_LIMIT');
+find(tree,n=>n.type==='input').props.onChange({target:{files:[new File([new Uint8Array(20*1024*1024)],'limit.pdf')],value:'y'}});
+await new Promise(resolve=>setImmediate(resolve));
+assert.deepEqual(sent,['POST /files'],'a file exactly at the limit is sent');
+// --- error texts: the three languages cover the same codes; texts are complete and in the portal's Uzbek style ---
+const uzRuCodes=Object.keys(i18n.errors).sort(),enCodes=Object.keys(i18n.englishErrors).sort();
+assert.deepEqual(uzRuCodes,enCodes,'uz/ru and en error codes must be the same set');
+assert.ok(!enCodes.includes('UPLOAD_TOO_LARGE'),'the backend never sends UPLOAD_TOO_LARGE');
+for(const[code,[uz,ru]]of Object.entries(i18n.errors)){assert.ok(uz.length>3&&ru.length>3,code);assert.ok(/[А-Яа-яЁё]/.test(ru)&&!/[А-Яа-яЁё]/.test(uz),code+' languages');}
+for(const[code,text]of Object.entries(i18n.englishErrors))assert.ok(text.length>3&&!/[А-Яа-яЁё]/.test(text),code+' en');
+const plainUz=text=>/[oOgG][‘ʻ’']|sh|ch|Sh|Ch/.test(text.replace(/Toshkent|NAMUNA/g,''));
+for(const[code,[uz]]of Object.entries(i18n.errors))assert.ok(!plainUz(uz),'Uzbek error text must use the portal spelling: '+code+' '+uz);
+for(const[key,value]of Object.entries(i18n.uz))assert.ok(!plainUz(value),'Uzbek text must use the portal spelling: '+key+' '+value);
+assert.equal(i18n.errorText('MALWARE_DETECTED','en'),'The malicious file was blocked.');
+assert.equal(i18n.errorText('UPLOAD_SIZE_LIMIT','uz').includes('20 MB'),true);
+assert.equal(i18n.errorText('NOT_A_CODE','en'),'Could not complete this action. Please try again.');
+// --- validation messages come from codes, never from the server's text ---
+const entries=(details,codes)=>validation.validationEntries(details,codes).map(e=>e.field+':'+e.key);
+assert.deepEqual(entries({birthday:['Date has wrong format. Use one of these formats instead: YYYY-MM-DD.'],displayName:["Ushbu maydon to'ldirilishi shart"]},{birthday:['invalid'],displayName:['required']}),['birthday:vDate','displayName:vRequired']);
+assert.deepEqual(entries({},{translations:{ru:{title:['max_length']}},expiresAt:['expires_before_publish'],bogus:'unknown_field',publishedAt:['invalid'],workEmail:['invalid'],mobilePhone:['phone_short','invalid']}),['title:vTooLong','expiresAt:vExpiry','bogus:vUnknownField','publishedAt:vDateTime','workEmail:vEmail','mobilePhone:vPhoneShort','mobilePhone:vPhone']);
+assert.deepEqual(entries({name:['x']},undefined),['name:invalidValue'],'older servers: generic message, still no raw text');
+assert.deepEqual(entries(undefined,undefined),[]);
+// --- scheduled date-time and the namesake panel ---
+assert.equal(dateFormat.formatPortalDateTime(new Date('2026-11-02T21:30:00Z'),'uz'),'3-noyabr 2026-yil, 02:30');
+assert.equal(dateFormat.formatPortalDateTime(new Date('2026-11-02T21:30:00Z'),'en'),'3 November 2026, 02:30');
+const namesake=harness(async()=>{throw new api.ApiError('DUPLICATE_NAME',409,{matches:[{id:'M',displayName:'Same Name',employeeNumber:'1',status:'ACTIVE'}]});});
+const nsProps={initial:{id:'E',displayName:'Same Name',positionTitle:'Role',officeId:'O',unitId:'U'}};
+tree=namesake.render(namesake.forms.EmployeeForm,nsProps);
+await find(tree,n=>n.type==='form').props.onSubmit({preventDefault(){}});
+tree=namesake.render(namesake.forms.EmployeeForm,nsProps);
+assert.ok(find(tree,n=>n.props?.className==='duplicate-panel'),'confirmation panel is shown');
+assert.equal(find(tree,n=>typeof n.type==='function'&&n.type.name==='FormError').props.error,null,'no second, contradictory error for a namesake');
+// --- import preview: translated reasons and resolved unit/office ---
+const flat=node=>node==null||typeof node==='boolean'?'':typeof node==='string'||typeof node==='number'?String(node):[node.props?.children].flat(Infinity).map(flat).join('');
+const importRow={row:2,data:{displayName:'A B',positionTitle:'P'},employeeNumber:'',existingId:null,updatedAt:null,matches:[],sameNameInFile:false,suggestedAction:'NEW',entered:{unit:'Missing unit',office:'HQ',managerNumber:''},resolved:{unit:null,office:'Head office'},
+  errors:[{field:'unit',code:'UNKNOWN_OR_AMBIGUOUS_REFERENCE'},{field:'birthday',code:'INVALID_DATE'},{field:'row',code:'VALIDATION_ERROR',details:{displayName:['raw']},fieldCodes:{displayName:['min_length']}}]};
+const previewWithErrors={id:'P',mapping:{},headers:[],total:1,errors:[{row:2,errors:importRow.errors}],rows:[importRow]};
+const rows=harness(async()=>previewWithErrors);
+tree=rows.render(rows.forms.ImportForm,{});find(tree,n=>n.type===rows.components.UploadBox).props.onReady({id:'A'});
+await new Promise(resolve=>setImmediate(resolve));tree=rows.render(rows.forms.ImportForm,{});
+const body=find(tree,n=>n.type==='tbody');
+const reasons=[];(function walk(n){if(!n||typeof n!=='object')return;if(n.props?.className==='notice notice-error')reasons.push(flat(n));for(const c of [n.props?.children].flat(Infinity))walk(c);})(body);
+assert.ok(reasons[0].startsWith('importUnitNotFound'),'unit problem gets its own reason, not the generic code');
+assert.equal(reasons[1],'importDateInvalid');
+assert.ok(!reasons.join('').includes('UNKNOWN_OR_AMBIGUOUS_REFERENCE')&&!reasons.join('').includes('raw'));
+const cells=flat(body);assert.ok(cells.includes('Head office')&&cells.includes('Missing unit'),'resolved office and the unresolved entry are shown');
+console.log('PASS: API responses incl. non-JSON 413; error-text coverage and Uzbek spelling; validation codes; upload size limit; namesake panel; import reasons; locale across login/MFA; Tashkent dates and birthday input; upload races/retry; versions/import; news dates; picker ARIA; close guards. Component logic only, not browser E2E.');

@@ -851,3 +851,5 @@ td select { font-size: 13px; min-width: 145px; min-height: 38px; padding: 8px; }
 .locale-picker{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;color:#53627c}.locale-picker select{min-height:44px;width:112px;padding:8px 5px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer}.locale-picker select:focus-visible{outline:2px solid #3157ef;outline-offset:2px}
 
 .header-back{min-width:44px;justify-content:center}@media(max-width:480px){.page-breadcrumb{display:none}.locale-picker select{width:94px}.locale-picker{gap:3px}}
+.cell-error { color: #b42318; font-weight: 600; }
+.scheduled-note { margin: 0 0 10px; }
