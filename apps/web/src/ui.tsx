@@ -1,4 +1,5 @@
 import {formatPortalDate} from './date-format';
+import {splitSnippet} from './form-utils';
 import {useEffect,useRef,useState,useId,type ReactNode} from 'react';
 import {Link} from 'react-router-dom';
 import {AlertCircle,ArrowLeft,ArrowRight,Check,ChevronDown,Copy,FileText,LoaderCircle,Search,UploadCloud,X,Users} from 'lucide-react';
@@ -34,6 +35,7 @@ export function Picker({label,options,value,onChange,placeholder='',required=fal
 }
 export function SearchInput({value,onChange,placeholder}:{value:string;onChange:(v:string)=>void;placeholder:string}){const{t}=usePortal();return <div className="search-input"><Search size={19}/><input aria-label={placeholder} placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)}/>{value&&<button className="icon-button" onClick={()=>onChange('')} aria-label={t('reset')}><X size={16}/></button>}</div>;}
 export function DateText({value,day,month}:{value?:string|null;day?:number|null;month?:number|null}){const{locale}=usePortal();if(!value&&(!day||!month))return <>—</>;const date=value?new Date(value.length===10?value+'T12:00:00Z':value):new Date(Date.UTC(2000,(month??1)-1,day??1,12));return <>{formatPortalDate(date,locale,Boolean(value))}</>;}
+export function Snippet({text,match}:{text:string;match?:number[]}){const parts=splitSnippet(text,match);return <p className="search-snippet">{parts?<>{parts[0]}<mark>{parts[1]}</mark>{parts[2]}</>:text}</p>;}
 export function CopyButton({value}:{value:string}){const{t,notify}=usePortal();return <button className="icon-button" title={t('copy')} aria-label={t('copy')} onClick={async()=>{try{await navigator.clipboard.writeText(value);notify(t('copied'));}catch{notify(value);}}}><Copy size={15}/></button>;}
 export function OcrBadge({status}:{status?:string}){const{t}=usePortal();const key:Key=status==='READY'?'ocrReady':status==='PROCESSING'?'ocrProcessing':status==='ERROR'?'ocrError':'ocrPending';return <Badge tone={status==='READY'?'green':status==='ERROR'?'orange':'neutral'}>{t(key)}</Badge>;}
 export function UploadBox({purpose,onReady,onReset,disabled=false}:{purpose:'DOCUMENT'|'PHOTO'|'COVER'|'IMPORT';onReady:(f:FileState)=>void;onReset:()=>void;disabled?:boolean}){

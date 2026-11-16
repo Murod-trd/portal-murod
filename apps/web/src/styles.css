@@ -436,7 +436,8 @@ td select { font-size: 13px; min-width: 145px; min-height: 38px; padding: 8px; }
 .search-news-row h3 { font-size: 17px; margin-bottom: 8px; }
 .search-news-row p { font-size: 14px; margin: 0; }
 .search-news-row > svg { position: absolute; right: 20px; top: 25px; color: #8b9fc6; }
-.search-snippet { font-size: 13px; line-height: 1.7; margin: 12px 0 0; max-height: 4em; overflow: hidden; }
+.search-snippet { font-size: 13px; line-height: 1.7; margin: 12px 0 0; max-height: 6.8em; overflow: hidden; }
+.search-snippet mark { background: #ffe58a; color: inherit; border-radius: 3px; padding: 0 2px; }
 
 /* Shared authoring forms, duplicate review and file processing. */
 .field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 20px; min-width: 0; }

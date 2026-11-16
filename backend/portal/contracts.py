@@ -66,7 +66,8 @@ Version = record('Version', {**strings('id label changeNote fileId fileName mime
 Document = record('Document', {**strings('id title number category description language status updatedAt'),
                               **strings('documentDate effectiveDate ownerUnitId currentVersionId', True),
                               **strings('versionId versionLabel securityStatus mimeType extractionStatus snippet', optional=True),
-                              'translations': Translations(), 'fileSize': integer(optional=True), 'outdated': boolean(True)})
+                              'translations': Translations(), 'fileSize': integer(optional=True), 'outdated': boolean(True),
+                              'snippetMatch': s.ListField(child=integer(), required=False)})
 DocumentDetail = record('DocumentDetail', {**Document().fields, 'versions': Version(many=True)})
 VersionDetail = record('VersionDetail', {**Version().fields, 'document': Document(), 'previewText': text()})
 DocumentPage = paginated('Document', Document)

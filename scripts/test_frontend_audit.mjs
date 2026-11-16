@@ -118,4 +118,8 @@ find(tree,n=>n.type==='input'&&n.props.type==='date').props.onInput({currentTarg
 tree=employeeForm.render(employeeForm.forms.EmployeeForm,employeeProps);
 await find(tree,n=>n.type==='form').props.onSubmit({preventDefault(){}});
 assert.equal(employeePayload.birthday,'1994-11-03','date input must reach the submitted employee payload');
+assert.deepEqual(dates.splitSnippet('a needle b',[2,8]),['a ','needle',' b']);
+for(const bad of [undefined,[],[3],[5,5],[-1,2],[2,99],[1.5,3]])assert.equal(dates.splitSnippet('a needle b',bad),null,'untrusted match ranges fall back to plain text');
+const marked=h.components.Snippet({text:'x <b>needle</b> y',match:[2,5]});
+assert.equal(find(marked,n=>n.type==='mark').props.children,'<b>','snippet text stays a React text node, never markup');
 console.log('PASS: API responses; locale across login/MFA; Tashkent dates and birthday input; upload races/retry; versions/import; news dates; picker ARIA; close guards. Component logic only, not browser E2E.');

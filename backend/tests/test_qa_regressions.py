@@ -488,4 +488,5 @@ def test_global_search_content_query_cost_is_bounded(hr,employee):
         result=svc.search(employee[0],'costword')
     assert result['documents']['total']==1 and len(result['documents']['items'][0]['snippet'])<=360
     assert len(result['documents']['items'])<=6
-    assert not any('normalized_text' in q['sql'].split(' FROM ')[0] for q in captured)
+    import re  # the full texts are only ever used inside SUBSTR/INSTR/LENGTH, never selected as columns
+    assert not any(re.search(r'(?<!\()"portal_documentversion"\."(normalized|extracted)_text"',q['sql'].split(' FROM ')[0]) for q in captured)
