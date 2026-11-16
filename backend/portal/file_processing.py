@@ -321,8 +321,9 @@ class OcrRun:
                'meanConfidence':round(sum(q['meanConfidence'] for q in scored)/len(scored),2) if scored else None,
                'lowConfidenceLines':sum(q['lowConfidenceLines'] for q in pages),
                'profiles':list(dict.fromkeys(profile for q in pages for profile in q['profiles'])),
-               'rotatedPages':sum(r!=0 for r in rotations),'sparsePages':sum(q['sparse'] for q in pages)}
-        if value['rotatedPages']:
+               'rotatedPages':sum(q['rotation']!=0 and not q['sparse'] for q in pages),'sparsePages':sum(q['sparse'] for q in pages)}
+        # Drawing (sparse) pages turn only to read labels: they are not reported as auto-rotated pages, but their angle stays in `rotations`.
+        if any(rotations):
             value['rotations']=rotations
         return {**value,**extra}
 

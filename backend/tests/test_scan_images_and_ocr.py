@@ -551,3 +551,18 @@ def test_photo_and_cover_follow_exif_orientation(purpose, limit, orientation, ex
     if orientation == 6:  # rotated 90 degrees clockwise: the red top-left corner moves to the top-right
         r, g, b = cleaned.getpixel((cleaned.width - 20, 20))
         assert r > 200 and g < 80 and b < 80
+
+
+def test_drawing_pages_turned_only_to_read_labels_are_not_reported_as_rotated(monkeypatch):
+    monkeypatch.setattr('portal.file_processing.ocr_languages_ready', lambda languages: None)
+    pages = iter([(90, False), (270, True), (0, True)])
+    def page(image, languages, deadline, state=None, probe_deadline=None):
+        rotation, sparse = next(pages)
+        return {'text': 'x', 'searchText': 'x', 'quality': {'meanConfidence': 90.0, 'lowConfidenceLines': 0, 'lineCount': 1,
+                'profiles': ['eng'], 'rotation': rotation, 'words': 3, 'sparse': sparse}}
+    monkeypatch.setattr('portal.ocr.ocr_page', page)
+    quality = extract_text(tiff_pages(3, (1500, 1000)), 'drawing.tif', 'eng', 80)['quality']
+    assert quality['rotatedPages'] == 1 and quality['sparsePages'] == 2 and quality['rotations'] == [90, 270, 0]
+    pages = iter([(270, True), (0, True)])
+    quality = extract_text(tiff_pages(2, (1500, 1000)), 'drawing.tif', 'eng', 80)['quality']
+    assert quality['rotatedPages'] == 0 and quality['rotations'] == [270, 0]
