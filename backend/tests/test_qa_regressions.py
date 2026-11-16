@@ -167,7 +167,6 @@ def test_restore_into_inactive_unit_or_office_is_409(hr,org):
     assert api.post(f'/api/v1/employees/{e.id}/restore').status_code==200
 
 def test_repeated_archive_and_restore_are_409_and_keep_state(hr,org):
-    from django.utils import timezone
     _,_,api=hr
     e=employee_of(org)
     assert api.post(f'/api/v1/employees/{e.id}/restore').status_code==409
