@@ -266,13 +266,13 @@ def inspect_clean_file(data,name,purpose,max_pages):
         inspect_scan_image(data,Path(name).suffix.lower(),max_pages)
     output={'mimeType':mime}
     if purpose in {'PHOTO','COVER'}:
-        from PIL import Image
+        from PIL import Image,ImageOps
         Image.MAX_IMAGE_PIXELS=20_000_000
         with warnings.catch_warnings():
             warnings.simplefilter('error',Image.DecompressionBombWarning)
             image=Image.open(io.BytesIO(data))
             image.load()
-            image=image.convert('RGB')
+            image=ImageOps.exif_transpose(image).convert('RGB')  # phone photos are stored sideways with an EXIF flag the saved JPEG drops
             image.thumbnail((1600,1000) if purpose=='COVER' else (800,800))
             buffer=io.BytesIO()
             image.save(buffer,format='JPEG',quality=85)

@@ -532,3 +532,22 @@ def test_scan_download_and_inline_preview(hr, mime, inline):
     assert response['X-Content-Type-Options'] == 'nosniff'
     assert response['Content-Disposition'].startswith('inline') == inline
     assert api.client.get(f'/api/v1/files/{file.id}/download')['Content-Disposition'].startswith('attachment')
+
+
+@pytest.mark.parametrize('purpose,limit', [('PHOTO', (800, 800)), ('COVER', (1600, 1000))])
+@pytest.mark.parametrize('orientation,expected', [(1, (400, 200)), (6, (200, 400)), (8, (200, 400)), (3, (400, 200))])
+def test_photo_and_cover_follow_exif_orientation(purpose, limit, orientation, expected):
+    image = Image.new('RGB', (400, 200), 'white')
+    ImageDraw.Draw(image).rectangle((0, 0, 99, 99), fill=(255, 0, 0))  # red corner marks the top-left
+    exif = Image.Exif()
+    exif[0x0112] = orientation
+    buffer = io.BytesIO()
+    image.save(buffer, format='JPEG', exif=exif)
+    import base64
+    output = inspect_clean_file(buffer.getvalue(), 'phone.jpg', purpose, 80)
+    cleaned = Image.open(io.BytesIO(base64.b64decode(output['cleanedBase64'])))
+    assert cleaned.size == expected and max(cleaned.size) <= max(limit)
+    assert not cleaned.getexif().get(0x0112)  # the flag is baked into the pixels, never kept
+    if orientation == 6:  # rotated 90 degrees clockwise: the red top-left corner moves to the top-right
+        r, g, b = cleaned.getpixel((cleaned.width - 20, 20))
+        assert r > 200 and g < 80 and b < 80
