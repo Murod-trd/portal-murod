@@ -103,7 +103,7 @@ class BoundedDateTimeField(s.DateTimeField):
         except (OverflowError,ValueError):
             valid=False
         if not valid:
-            raise s.ValidationError('Date is outside the supported range.',code='date_range')
+            raise s.ValidationError('Date is outside the supported range.',code='datetime_range')
         return result
 
 class NewsInput(StrictSerializer):
