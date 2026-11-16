@@ -235,13 +235,18 @@ def published_news():
     return m.News.objects.filter(deleted_at=None,status='PUBLISHED').filter(Q(published_at=None)|Q(published_at__lte=now)).filter(Q(expires_at=None)|Q(expires_at__gt=now))
 
 def news_data(n,full=False):
-    value={'id':str(n.id),'slug':str(n.id),'title':n.title,'summary':n.summary,'category':n.category,'language':n.language,'translations':n.translations,'status':n.status,'pinned':n.pinned,'publishedAt':n.published_at.isoformat() if n.published_at else None,'expiresAt':n.expires_at.isoformat() if n.expires_at else None,'updatedAt':n.updated_at.isoformat(),'authorName':getattr(n.author,'portal_account',None).display_name if hasattr(n.author,'portal_account') else n.author.username,'coverFileId':str(n.cover_id) if n.cover_id else None,'views':n.view_count if hasattr(n,'view_count') else n.views.count()}
+    now=timezone.now()
+    value={'id':str(n.id),'slug':str(n.id),'title':n.title,'summary':n.summary,'category':n.category,'language':n.language,'translations':n.translations,'status':n.status,'pinned':n.pinned,'publishedAt':n.published_at.isoformat() if n.published_at else None,'expiresAt':n.expires_at.isoformat() if n.expires_at else None,'updatedAt':n.updated_at.isoformat(),'authorName':getattr(n.author,'portal_account',None).display_name if hasattr(n.author,'portal_account') else n.author.username,'coverFileId':str(n.cover_id) if n.cover_id else None,'views':n.view_count if hasattr(n,'view_count') else n.views.count(),'scheduled':bool(n.status=='PUBLISHED' and n.published_at and n.published_at>now),'expired':bool(n.expires_at and n.expires_at<=now)}
     if full:
         value['body']=n.body
     return value
 
 def news(user,query):
-    qs=m.News.objects.filter(deleted_at=None) if managed(user) and query.get('manage')=='true' else published_news()
+    if managed(user):
+        # Managers also see items that are published but scheduled for later (flagged `scheduled`); `manage` adds drafts and expired items.
+        qs=m.News.objects.filter(deleted_at=None) if query.get('manage')=='true' else m.News.objects.filter(deleted_at=None,status='PUBLISHED').filter(Q(expires_at=None)|Q(expires_at__gt=timezone.now()))
+    else:
+        qs=published_news()
     if query.get('q'):
         raw=search_text(query['q'])
         qs=qs.filter(Q(normalized_title__contains=normalize(raw))|Q(summary__icontains=raw))
