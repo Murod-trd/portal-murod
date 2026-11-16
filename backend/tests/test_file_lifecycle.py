@@ -212,3 +212,36 @@ def test_extraction_can_finish_in_trash_and_is_ready_after_restore(hr,employee):
     response=employee[2].get(f'/api/v1/documents/{doc.id}/versions/{current.pk}')
     assert response.status_code==200
     assert response.json()['previewText']=='extracted while in trash'
+
+
+def worker_fetch(api,job,token):
+    return api.client.get(f'/api/internal/worker/{job.id}/file',HTTP_AUTHORIZATION='Bearer '+token)
+
+
+def test_missing_stored_file_ends_scan_in_visible_error_without_retry(hr,settings):
+    api=hr[2]
+    file=m.FileObject.objects.get(pk=upload(api).json()['id'])
+    Path(file.file.path).unlink()  # a host antivirus removed the quarantined bytes
+    m.ProcessingJob.objects.filter(file=file).delete()
+    job,token=running_job(file,'SCAN')
+    file.security_status='SCANNING'
+    file.save(update_fields=['security_status'])
+    response=worker_fetch(api,job,token)
+    assert response.status_code==410 and response.json()=={'code':'FILE_MISSING'}
+    job.refresh_from_db(),file.refresh_from_db()
+    assert (job.status,job.error_code)==('ERROR','FILE_MISSING') and job.lease_hash==''
+    assert (file.security_status,file.rejection_code)==('REJECTED','FILE_MISSING')
+    state=api.get(f'/api/v1/files/{file.id}/security-status').json()
+    assert state['securityStatus']=='REJECTED' and state['rejectionCode']=='FILE_MISSING'
+    claim=api.client.post('/api/internal/worker/claim',{},content_type='application/json',HTTP_AUTHORIZATION='Bearer '+settings.WORKER_TOKEN)
+    assert claim.json()=={'job':None}  # the job is terminal, not offered again
+    assert worker_fetch(api,job,token).status_code==404  # and the lease is gone
+
+
+def test_missing_stored_file_marks_extraction_as_error(hr):
+    doc,version,_=create_doc(hr)
+    Path(version.file.file.path).unlink()
+    job,token=running_job(version.file)
+    assert worker_fetch(hr[2],job,token).status_code==410
+    version.refresh_from_db(),job.refresh_from_db()
+    assert version.extraction_status=='ERROR' and version.extraction_error=='FILE_MISSING' and job.status=='ERROR'

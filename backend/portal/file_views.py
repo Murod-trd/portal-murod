@@ -226,13 +226,35 @@ class WorkerHeartbeatView(WorkerView):
         m.WorkerHeartbeat.objects.update_or_create(name='file-worker',defaults={'seen_at':timezone.now(),'capabilities':{'ocrLanguages':languages,'processorSandbox':request.data.get('processorSandbox') is True}})
         return Response({'success':True})
 
+def fail_job(job,file,error):
+    job.status,job.error_code='ERROR',error
+    if job.kind=='SCAN':
+        file.security_status='SCAN_ERROR' if error.startswith('ANTIVIRUS') else 'REJECTED'
+        file.rejection_code=error
+        file.save(update_fields=['security_status','rejection_code'])
+    elif job.kind=='EXTRACT':
+        m.DocumentVersion.objects.filter(file=file).update(extraction_status='ERROR',extraction_error=error)
+    audit(None,'PROCESSING_FAILED','FILE',file.id,outcome='FAILED',metadata={'code':error,'kind':job.kind})
+
 class WorkerFileView(WorkerView):
     @extend_schema(exclude=True)
     def get(self,request,id):
         job=self.lease(request,id)
         if job.kind!='SCAN' and job.file.security_status!='APPROVED':
             raise PortalError('FILE_NOT_APPROVED',403)
-        return FileResponse(job.file.file.open('rb'),content_type='application/octet-stream',as_attachment=True,filename='input.bin')
+        try:
+            stream=job.file.file.open('rb')
+        except OSError:
+            # The stored bytes are gone (for example removed by a host antivirus): end the job in a visible error, never retry forever.
+            logging.getLogger('portal').error('Stored file is missing: file_id=%s kind=%s',job.file_id,job.kind)
+            with domain_write():
+                job=get_or_error(m.ProcessingJob.objects.select_for_update().select_related('file'),pk=id,status='RUNNING')
+                fail_job(job,job.file,'FILE_MISSING')
+                job.finished_at=timezone.now()
+                job.lease_hash=''
+                job.save()
+            return Response({'code':'FILE_MISSING'},status=410)
+        return FileResponse(stream,content_type='application/octet-stream',as_attachment=True,filename='input.bin')
 
 class WorkerResultView(WorkerView):
     @extend_schema(exclude=True)
@@ -248,14 +270,7 @@ class WorkerResultView(WorkerView):
             if not job.lease_expires or job.lease_expires<=timezone.now() or file.rejection_code=='DELETED':
                 raise PortalError('LEASE_EXPIRED',403)
             if error:
-                job.status,job.error_code='ERROR',error
-                if job.kind=='SCAN':
-                    file.security_status='SCAN_ERROR' if error.startswith('ANTIVIRUS') else 'REJECTED'
-                    file.rejection_code=error
-                    file.save(update_fields=['security_status','rejection_code'])
-                elif job.kind=='EXTRACT':
-                    m.DocumentVersion.objects.filter(file=file).update(extraction_status='ERROR',extraction_error=error)
-                audit(None,'PROCESSING_FAILED','FILE',file.id,outcome='FAILED',metadata={'code':error,'kind':job.kind})
+                fail_job(job,file,error)
             elif job.kind=='SCAN':
                 if result.get('status')!='APPROVED' or not result.get('scannerVersion') or not result.get('signatureVersion'):
                     raise PortalError('INCOMPLETE_SCAN_RESULT')

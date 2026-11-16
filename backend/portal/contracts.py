@@ -27,7 +27,7 @@ def paginated(name, item):
     return record(name+'Page', {'items': item(many=True), 'total': integer(), 'page': integer(), 'limit': integer()})
 
 
-Error = record('Error', {'code': text(), 'details': s.JSONField(required=False)})
+Error = record('Error', {'code': text(), 'details': s.JSONField(required=False), 'fieldCodes': s.JSONField(required=False)})
 Success = record('Success', {'success': boolean()})
 Identity = record('Identity', {'id': text()})
 EmployeeSaved = record('EmployeeSaved', {'id': text(), 'employeeNumber': text()})
@@ -51,7 +51,7 @@ Translation = record('Translation', strings('title summary body description', op
 Translations = record('Translations', {'uz': Translation(required=False), 'ru': Translation(required=False)})
 News = record('News', {**strings('id slug title summary category language status updatedAt authorName'),
                       **strings('coverFileId publishedAt expiresAt', True), 'body': text(optional=True),
-                      'translations': Translations(), 'pinned': boolean(), 'views': integer()})
+                      'translations': Translations(), 'pinned': boolean(), 'views': integer(), 'scheduled': boolean(), 'expired': boolean()})
 NewsPage = paginated('News', News)
 Quality = record('OcrQuality', {'engine': text(optional=True), 'ocrPages': integer(optional=True),
                               'meanConfidence': s.FloatField(allow_null=True, required=False),
@@ -66,7 +66,8 @@ Version = record('Version', {**strings('id label changeNote fileId fileName mime
 Document = record('Document', {**strings('id title number category description language status updatedAt'),
                               **strings('documentDate effectiveDate ownerUnitId currentVersionId', True),
                               **strings('versionId versionLabel securityStatus mimeType extractionStatus snippet', optional=True),
-                              'translations': Translations(), 'fileSize': integer(optional=True), 'outdated': boolean(True)})
+                              'translations': Translations(), 'fileSize': integer(optional=True), 'outdated': boolean(True),
+                              'snippetMatch': s.ListField(child=integer(), required=False)})
 DocumentDetail = record('DocumentDetail', {**Document().fields, 'versions': Version(many=True)})
 VersionDetail = record('VersionDetail', {**Version().fields, 'document': Document(), 'previewText': text()})
 DocumentPage = paginated('Document', Document)
@@ -94,12 +95,13 @@ System = record('System', {**strings('database mfaPolicy storage ocrLanguages in
                           'demo': boolean(), 'antivirusConfigured': boolean(), 'pendingJobs': integer(),
                           'failedJobs': integer(), 'quarantinedFiles': integer()})
 Health = record('Health', {'status': text(), 'filePipeline': text(optional=True)})
-ImportIssue = record('ImportIssue', {**strings('field code'), 'details': s.JSONField(required=False)})
+ImportIssue = record('ImportIssue', {**strings('field code'), 'details': s.JSONField(required=False), 'fieldCodes': s.JSONField(required=False)})
 ImportError = record('ImportError', {'row': integer(), 'errors': ImportIssue(many=True)})
 ImportData = record('ImportData', strings('displayName positionTitle unitId officeId managerId extension mobilePhone workEmail birthday floor room', optional=True))
 ImportRow = record('ImportRow', {'row': integer(), 'data': ImportData(), 'employeeNumber': text(),
                                 **strings('existingId updatedAt', True), 'matches': Duplicate(many=True),
                                 'sameNameInFile': boolean(), 'errors': ImportIssue(many=True),
+                                'entered': s.DictField(child=text(), required=False), 'resolved': s.DictField(child=text(True), required=False),
                                 'suggestedAction': s.ChoiceField(choices=['UPDATE', 'CHOOSE', 'NEW'])})
 ImportPreview = record('ImportPreview', {'id': text(), 'headers': s.ListField(child=text()),
                                         'mapping': s.DictField(child=text()), 'rows': ImportRow(many=True),

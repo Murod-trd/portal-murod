@@ -2,12 +2,20 @@ import logging
 from django.http import JsonResponse
 from django.db import IntegrityError, OperationalError
 from django.core.exceptions import ValidationError
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError as ApiValidationError
 
 class PortalError(APIException):
     def __init__(self, code, status=400, details=None):
         self.status_code = status
         self.detail = {'code': code, **({'details': details} if details is not None else {})}
+
+def error_codes(detail):
+    """Machine-readable twin of DRF validation details: the same shape with each message replaced by its code."""
+    if isinstance(detail, dict):
+        return {key: error_codes(value) for key, value in detail.items()}
+    if isinstance(detail, (list, tuple)):
+        return [error_codes(value) for value in detail]
+    return getattr(detail, 'code', None) or 'invalid'
 
 def exception_handler(exc, context):
     from rest_framework.views import exception_handler as drf_exception_handler
@@ -19,7 +27,7 @@ def exception_handler(exc, context):
             code = 'CSRF_REJECTED' if 'CSRF' in str(getattr(exc, 'detail', '')) else ('AUTH_REQUIRED' if not context['request'].user.is_authenticated else 'FORBIDDEN')
             response.data = {'code': code}
         elif isinstance(response.data, dict) and 'code' not in response.data:
-            response.data = {'code': 'VALIDATION_ERROR', 'details': response.data}
+            response.data = {'code': 'VALIDATION_ERROR', 'details': response.data, **({'fieldCodes': error_codes(exc.detail)} if isinstance(exc, ApiValidationError) else {})}
         return response
     if isinstance(exc, IntegrityError):
         from rest_framework.response import Response

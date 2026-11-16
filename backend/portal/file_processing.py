@@ -266,13 +266,13 @@ def inspect_clean_file(data,name,purpose,max_pages):
         inspect_scan_image(data,Path(name).suffix.lower(),max_pages)
     output={'mimeType':mime}
     if purpose in {'PHOTO','COVER'}:
-        from PIL import Image
+        from PIL import Image,ImageOps
         Image.MAX_IMAGE_PIXELS=20_000_000
         with warnings.catch_warnings():
             warnings.simplefilter('error',Image.DecompressionBombWarning)
             image=Image.open(io.BytesIO(data))
             image.load()
-            image=image.convert('RGB')
+            image=ImageOps.exif_transpose(image).convert('RGB')  # phone photos are stored sideways with an EXIF flag the saved JPEG drops
             image.thumbnail((1600,1000) if purpose=='COVER' else (800,800))
             buffer=io.BytesIO()
             image.save(buffer,format='JPEG',quality=85)
@@ -321,8 +321,9 @@ class OcrRun:
                'meanConfidence':round(sum(q['meanConfidence'] for q in scored)/len(scored),2) if scored else None,
                'lowConfidenceLines':sum(q['lowConfidenceLines'] for q in pages),
                'profiles':list(dict.fromkeys(profile for q in pages for profile in q['profiles'])),
-               'rotatedPages':sum(r!=0 for r in rotations),'sparsePages':sum(q['sparse'] for q in pages)}
-        if value['rotatedPages']:
+               'rotatedPages':sum(q['rotation']!=0 and not q['sparse'] for q in pages),'sparsePages':sum(q['sparse'] for q in pages)}
+        # Drawing (sparse) pages turn only to read labels: they are not reported as auto-rotated pages, but their angle stays in `rotations`.
+        if any(rotations):
             value['rotations']=rotations
         return {**value,**extra}
 

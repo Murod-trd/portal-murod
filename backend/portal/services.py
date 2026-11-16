@@ -1,6 +1,8 @@
 from datetime import datetime
-from django.db.models import F, Q, Count
-from django.db.models.functions import Substr
+import re
+from bisect import bisect_right
+from django.db.models import F, Q, Count, Value, BigIntegerField, IntegerField, ExpressionWrapper
+from django.db.models.functions import Substr, StrIndex, Length, Greatest, Cast
 from django.utils import timezone
 from . import models as m
 from .domain import normalize, search_fold, search_date, upcoming_birthday
@@ -233,13 +235,18 @@ def published_news():
     return m.News.objects.filter(deleted_at=None,status='PUBLISHED').filter(Q(published_at=None)|Q(published_at__lte=now)).filter(Q(expires_at=None)|Q(expires_at__gt=now))
 
 def news_data(n,full=False):
-    value={'id':str(n.id),'slug':str(n.id),'title':n.title,'summary':n.summary,'category':n.category,'language':n.language,'translations':n.translations,'status':n.status,'pinned':n.pinned,'publishedAt':n.published_at.isoformat() if n.published_at else None,'expiresAt':n.expires_at.isoformat() if n.expires_at else None,'updatedAt':n.updated_at.isoformat(),'authorName':getattr(n.author,'portal_account',None).display_name if hasattr(n.author,'portal_account') else n.author.username,'coverFileId':str(n.cover_id) if n.cover_id else None,'views':n.view_count if hasattr(n,'view_count') else n.views.count()}
+    now=timezone.now()
+    value={'id':str(n.id),'slug':str(n.id),'title':n.title,'summary':n.summary,'category':n.category,'language':n.language,'translations':n.translations,'status':n.status,'pinned':n.pinned,'publishedAt':n.published_at.isoformat() if n.published_at else None,'expiresAt':n.expires_at.isoformat() if n.expires_at else None,'updatedAt':n.updated_at.isoformat(),'authorName':getattr(n.author,'portal_account',None).display_name if hasattr(n.author,'portal_account') else n.author.username,'coverFileId':str(n.cover_id) if n.cover_id else None,'views':n.view_count if hasattr(n,'view_count') else n.views.count(),'scheduled':bool(n.status=='PUBLISHED' and n.published_at and n.published_at>now),'expired':bool(n.expires_at and n.expires_at<=now)}
     if full:
         value['body']=n.body
     return value
 
 def news(user,query):
-    qs=m.News.objects.filter(deleted_at=None) if managed(user) and query.get('manage')=='true' else published_news()
+    if managed(user):
+        # Managers also see items that are published but scheduled for later (flagged `scheduled`); `manage` adds drafts and expired items.
+        qs=m.News.objects.filter(deleted_at=None) if query.get('manage')=='true' else m.News.objects.filter(deleted_at=None,status='PUBLISHED').filter(Q(expires_at=None)|Q(expires_at__gt=timezone.now()))
+    else:
+        qs=published_news()
     if query.get('q'):
         raw=search_text(query['q'])
         qs=qs.filter(Q(normalized_title__contains=normalize(raw))|Q(summary__icontains=raw))
@@ -291,7 +298,99 @@ def document_data(d,v=None,inside=False):
     v=v or d.current_version
     result={'id':str(d.id),'title':d.title,'number':d.number,'documentDate':d.document_date,'effectiveDate':d.effective_date,'category':d.category,'description':d.description,'language':d.language,'translations':d.translations,'status':d.status,'ownerUnitId':str(d.owner_unit_id) if d.owner_unit_id else None,'currentVersionId':str(d.current_version_id) if d.current_version_id else None,'updatedAt':d.updated_at}
     if v:
-        result.update({'versionId':str(v.id),'versionLabel':v.label,'securityStatus':v.file.security_status,'mimeType':v.file.mime_type,'fileSize':v.file.size_bytes,'extractionStatus':v.extraction_status,'outdated':v.id!=d.current_version_id,'snippet':getattr(v,'search_snippet','') if inside else ''})
+        result.update({'versionId':str(v.id),'versionLabel':v.label,'securityStatus':v.file.security_status,'mimeType':v.file.mime_type,'fileSize':v.file.size_bytes,'extractionStatus':v.extraction_status,'outdated':v.id!=d.current_version_id,'snippet':getattr(v,'search_snippet','') or '' if inside else ''})
+        if inside and getattr(v,'snippet_match',None):
+            result['snippetMatch']=v.snippet_match
+    return result
+
+SNIPPET_HEAD,SNIPPET_REACH,SNIPPET_WIDE=360,2500,20000
+
+def snippet_columns(q,prefix='',reach=SNIPPET_REACH):
+    """Bounded text window around the first match. The database finds the match in the folded text, scales that offset to
+    the original text (folding only shortens it a little) and cuts a fixed-size window; Python then finds the exact match."""
+    text,folded=prefix+'extracted_text',prefix+'normalized_text'
+    folded_query=search_fold(q)
+    hit=StrIndex(folded,Value(folded_query))
+    scaled=ExpressionWrapper(Cast(hit,BigIntegerField())*Length(text)/Greatest(Length(folded),Value(1)),output_field=BigIntegerField())
+    start=Cast(Greatest(Value(1),scaled-Value(reach)),IntegerField())
+    return {'snippet_hit':hit,'snippet_from':start,'snippet_window':Substr(text,start,2*reach+len(folded_query))}
+
+def locate_match(window,folded_query):
+    """(start,end) of the first text in `window` whose folded form contains folded_query; folding is applied word by word so offsets map back."""
+    words=[(w.start(),w.end(),search_fold(w.group())) for w in re.finditer(r'\S+',window)]
+    words=[w for w in words if w[2]]
+    if not folded_query or not words:
+        return None
+    starts,position=[],0
+    for _,_,folded in words:
+        starts.append(position)
+        position+=len(folded)+1
+    index=' '.join(w[2] for w in words).find(folded_query)
+    if index<0:
+        return None
+    def edge(i,offset,last):
+        word_start,word_end,folded=words[i]
+        word=window[word_start:word_end]
+        if len(word)>200:
+            return word_end if last else word_start
+        if last:
+            size=max((n for n in range(len(word)+1) if len(search_fold(word[:n]))<=offset),default=0)
+            return word_start+size
+        return word_start+next((n for n in range(1,len(word)+1) if len(search_fold(word[:n]))>offset),len(word))-1
+    first=bisect_right(starts,index)-1
+    last=bisect_right(starts,index+len(folded_query)-1)-1
+    return edge(first,index-starts[first],False),edge(last,index+len(folded_query)-starts[last],True)
+
+def utf16(value):
+    return len(value.encode('utf-16-le','surrogatepass'))//2
+
+def context_snippet(window,span,more_before,more_after):
+    """About 360 characters around span, cut at word edges. Returns (text, [start,end] of the match in UTF-16 units)."""
+    start,end=span
+    left=max(0,start-110)
+    for _ in range(15):  # begin on a word edge
+        if 0<left<start and not window[left-1].isspace():
+            left+=1
+    right=max(end,min(len(window),left+SNIPPET_HEAD-2))  # room for both ellipses
+    for _ in range(15):  # and finish on one
+        if end<right<len(window) and not window[right].isspace():
+            right-=1
+    flat=lambda value:re.sub(r'\s+',' ',value)
+    before,match,after=flat(window[left:start]),flat(window[start:end]),flat(window[end:right])
+    lead='…' if left>0 or more_before else ''
+    tail='…' if right<len(window) or more_after else ''
+    begin=utf16(lead+before)
+    return lead+before+match+after+tail,[begin,begin+utf16(match)]
+
+def attach_snippets(rows,q,reach=SNIPPET_REACH):
+    """rows: (version_id,head,hit,window,window_start). Returns {version_id:(snippet,match|None)}; the head of the text when nothing is located."""
+    result,missed=({},[])
+    folded_query=search_fold(q)
+    for version_id,head,hit,window,window_from in rows:
+        found=locate_match(window or '',folded_query) if hit and window else None
+        if found:
+            result[version_id]=context_snippet(window,found,window_from>1,len(window)>=2*reach)
+        else:
+            result[version_id]=(head or '',None)
+            if hit and reach<SNIPPET_WIDE:
+                missed.append(version_id)
+    if missed:
+        wide=m.DocumentVersion.objects.filter(pk__in=missed).annotate(**snippet_columns(q,reach=SNIPPET_WIDE)).values_list('pk','snippet_hit','snippet_window','snippet_from')
+        result.update(attach_snippets([(pk,result[pk][0],hit,window,start) for pk,hit,window,start in wide],q,SNIPPET_WIDE))
+    return result
+
+def snippet_page(queryset,query,q,inside,version_of,mapper):
+    """Page of documents/versions; with inside search each row carries the text around its first match."""
+    result=page(queryset,query,lambda row:row)
+    rows=result['items']
+    if inside:
+        found=attach_snippets([(version_of(row).id,row.search_snippet,getattr(row,'snippet_hit',0),getattr(row,'snippet_window',''),getattr(row,'snippet_from',1)) for row in rows if version_of(row)],q) if q else {}
+        for row in rows:
+            version=version_of(row)
+            if version:
+                text,match=found.get(version.id) or (row.search_snippet or '',None)
+                version.search_snippet,version.snippet_match=text,match
+    result['items']=[mapper(row) for row in rows]
     return result
 
 def documents(user,query):
@@ -317,7 +416,10 @@ def documents(user,query):
             if inside:
                 condition|=Q(normalized_text__contains=search_fold(q),extraction_status='READY')
             versions=versions.filter(condition)
-        return page(versions.annotate(search_snippet=Substr('extracted_text',1,360)).defer('extracted_text','normalized_text','document__current_version__extracted_text','document__current_version__normalized_text').order_by('-document__updated_at','-created_at'),query,lambda v:document_data(v.document,v,inside))
+        versions=versions.defer('extracted_text','normalized_text','document__current_version__extracted_text','document__current_version__normalized_text').order_by('-document__updated_at','-created_at')
+        if inside:
+            versions=versions.annotate(search_snippet=Substr('extracted_text',1,SNIPPET_HEAD),**(snippet_columns(q) if q else {}))
+        return snippet_page(versions,query,q,inside,lambda v:v,lambda v:document_data(v.document,v,inside))
     if q:
         condition=Q(normalized_title__contains=normalize(q))|Q(number__icontains=q)
         if inside:
@@ -325,12 +427,8 @@ def documents(user,query):
         docs=docs.filter(condition)
     qs=docs.select_related('current_version__file').defer('current_version__extracted_text','current_version__normalized_text')
     if inside:
-        qs=qs.annotate(result_snippet=Substr('current_version__extracted_text',1,360))
-    def item(d):
-        if inside and d.current_version:
-            d.current_version.search_snippet=d.result_snippet or ''
-        return document_data(d,inside=inside)
-    return page(qs.order_by('-updated_at'),query,item)
+        qs=qs.annotate(search_snippet=Substr('current_version__extracted_text',1,SNIPPET_HEAD),**(snippet_columns(q,'current_version__') if q else {}))
+    return snippet_page(qs.order_by('-updated_at'),query,q,inside,lambda d:d.current_version,lambda d:document_data(d,inside=inside))
 
 def document(user,id):
     docs=m.Document.objects.filter(deleted_at=None)

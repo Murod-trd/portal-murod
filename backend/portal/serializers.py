@@ -13,27 +13,27 @@ BIDI_CONTROLS=set('\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\
 
 def validate_person_name(value):
     if any(unicodedata.category(ch)=='Cc' or ch in BIDI_CONTROLS for ch in value):
-        raise s.ValidationError('Control and bidirectional override characters are not allowed.')
+        raise s.ValidationError('Control and bidirectional override characters are not allowed.',code='control_chars')
 
 def validate_phone(value):
     if value and sum(ch in '0123456789' for ch in value)<5:
-        raise s.ValidationError('A phone number needs at least 5 digits.')
+        raise s.ValidationError('A phone number needs at least 5 digits.',code='phone_short')
 
 def validate_birthday(value):
     if not dt.date(1900,1,1)<=value<=timezone.localdate():
-        raise s.ValidationError('Birthday must be between 1900 and today.')
+        raise s.ValidationError('Birthday must be between 1900 and today.',code='birthday_range')
 
 def validate_document_date(value):
     if not dt.date(1990,1,1)<=value<=dt.date(2100,12,31):
-        raise s.ValidationError('Date must be between 1990 and 2100.')
+        raise s.ValidationError('Date must be between 1990 and 2100.',code='date_range')
 
 class StrictSerializer(s.Serializer):
     def to_internal_value(self, data):
         if not isinstance(data,Mapping):
-            raise s.ValidationError({'non_field_errors':['Expected a JSON object.']})
+            raise s.ValidationError({'non_field_errors':[s.ErrorDetail('Expected a JSON object.','not_object')]})
         unknown = set(data) - set(self.fields)
         if unknown:
-            raise s.ValidationError({key:'Unknown or protected field.' for key in unknown})
+            raise s.ValidationError({key:s.ErrorDetail('Unknown or protected field.','unknown_field') for key in unknown})
         return super().to_internal_value(data)
 
 class EmployeeInput(StrictSerializer):
@@ -86,7 +86,7 @@ class Translation(StrictSerializer):
 class Translations(s.DictField):
     def to_internal_value(self, data):
         if not isinstance(data,dict) or set(data)-{'uz','ru'}:
-            raise s.ValidationError('Only uz/ru translations are supported.')
+            raise s.ValidationError('Only uz/ru translations are supported.',code='unsupported_locale')
         result={}
         for locale,value in data.items():
             ser=Translation(data=value)
@@ -103,7 +103,7 @@ class BoundedDateTimeField(s.DateTimeField):
         except (OverflowError,ValueError):
             valid=False
         if not valid:
-            raise s.ValidationError('Date is outside the supported range.')
+            raise s.ValidationError('Date is outside the supported range.',code='datetime_range')
         return result
 
 class NewsInput(StrictSerializer):
@@ -120,12 +120,12 @@ class NewsInput(StrictSerializer):
     expiresAt = BoundedDateTimeField(source='expires_at',allow_null=True,required=False)
     def validate(self,attrs):
         if attrs.get('published_at') and attrs.get('expires_at') and attrs['expires_at']<=attrs['published_at']:
-            raise s.ValidationError({'expiresAt':'Must be later than publishedAt.'})
+            raise s.ValidationError({'expiresAt':s.ErrorDetail('Must be later than publishedAt.','expires_before_publish')})
         return attrs
     def validate_body(self,value):
         result=html(value)
         if not bleach.clean(result,tags=[],strip=True).strip():
-            raise s.ValidationError('Content is empty.')
+            raise s.ValidationError('Content is empty.',code='empty_content')
         return result
 
 class DocumentInput(StrictSerializer):

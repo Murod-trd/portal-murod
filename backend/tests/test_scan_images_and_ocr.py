@@ -532,3 +532,37 @@ def test_scan_download_and_inline_preview(hr, mime, inline):
     assert response['X-Content-Type-Options'] == 'nosniff'
     assert response['Content-Disposition'].startswith('inline') == inline
     assert api.client.get(f'/api/v1/files/{file.id}/download')['Content-Disposition'].startswith('attachment')
+
+
+@pytest.mark.parametrize('purpose,limit', [('PHOTO', (800, 800)), ('COVER', (1600, 1000))])
+@pytest.mark.parametrize('orientation,expected', [(1, (400, 200)), (6, (200, 400)), (8, (200, 400)), (3, (400, 200))])
+def test_photo_and_cover_follow_exif_orientation(purpose, limit, orientation, expected):
+    image = Image.new('RGB', (400, 200), 'white')
+    ImageDraw.Draw(image).rectangle((0, 0, 99, 99), fill=(255, 0, 0))  # red corner marks the top-left
+    exif = Image.Exif()
+    exif[0x0112] = orientation
+    buffer = io.BytesIO()
+    image.save(buffer, format='JPEG', exif=exif)
+    import base64
+    output = inspect_clean_file(buffer.getvalue(), 'phone.jpg', purpose, 80)
+    cleaned = Image.open(io.BytesIO(base64.b64decode(output['cleanedBase64'])))
+    assert cleaned.size == expected and max(cleaned.size) <= max(limit)
+    assert not cleaned.getexif().get(0x0112)  # the flag is baked into the pixels, never kept
+    if orientation == 6:  # rotated 90 degrees clockwise: the red top-left corner moves to the top-right
+        r, g, b = cleaned.getpixel((cleaned.width - 20, 20))
+        assert r > 200 and g < 80 and b < 80
+
+
+def test_drawing_pages_turned_only_to_read_labels_are_not_reported_as_rotated(monkeypatch):
+    monkeypatch.setattr('portal.file_processing.ocr_languages_ready', lambda languages: None)
+    pages = iter([(90, False), (270, True), (0, True)])
+    def page(image, languages, deadline, state=None, probe_deadline=None):
+        rotation, sparse = next(pages)
+        return {'text': 'x', 'searchText': 'x', 'quality': {'meanConfidence': 90.0, 'lowConfidenceLines': 0, 'lineCount': 1,
+                'profiles': ['eng'], 'rotation': rotation, 'words': 3, 'sparse': sparse}}
+    monkeypatch.setattr('portal.ocr.ocr_page', page)
+    quality = extract_text(tiff_pages(3, (1500, 1000)), 'drawing.tif', 'eng', 80)['quality']
+    assert quality['rotatedPages'] == 1 and quality['sparsePages'] == 2 and quality['rotations'] == [90, 270, 0]
+    pages = iter([(270, True), (0, True)])
+    quality = extract_text(tiff_pages(2, (1500, 1000)), 'drawing.tif', 'eng', 80)['quality']
+    assert quality['rotatedPages'] == 0 and quality['rotations'] == [270, 0]

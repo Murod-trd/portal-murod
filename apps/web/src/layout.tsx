@@ -6,7 +6,7 @@ import {usePortal} from './context';
 import {Avatar} from './ui';
 import type {Key} from './i18n';
 import {HomePage,NewsPage,ArticlePage,EmployeesPage,EmployeePage,StructurePage,DocumentsPage,DocumentPage,HrPage,TrashPage,ProfilePage,AdminPage,SearchPage} from './pages';
-export function LocaleToggle({locale,setLocale}:{locale:'uz'|'ru'|'en';setLocale:(v:'uz'|'ru'|'en')=>void}){return <label className="locale-picker"><Globe2 size={16}/><select aria-label={locale==='ru'?'Язык интерфейса':locale==='en'?'Interface language':'Interfeys tili'} value={locale} onChange={e=>setLocale(e.target.value as 'uz'|'ru'|'en')}><option value="uz">O‘zbekcha</option><option value="ru">Русский</option><option value="en">English</option></select></label>;}
+export function LocaleToggle({locale,setLocale}:{locale:'uz'|'ru'|'en';setLocale:(v:'uz'|'ru'|'en')=>void}){return <label className="locale-picker"><Globe2 size={16}/><select aria-label={locale==='ru'?'Язык интерфейса':locale==='en'?'Interface language':'Interfeys tili'} value={locale} onChange={e=>setLocale(e.target.value as 'uz'|'ru'|'en')}><option value="uz">Özbekça</option><option value="ru">Русский</option><option value="en">English</option></select></label>;}
 export function Brand({subtitle='Jamoa portali'}:{subtitle?:string}){return <Link className="brand" to="/"><span className="brand-mark"><i/><i/><i/><i/></span><span><strong>Toshkent Invest</strong><small>{subtitle}</small></span></Link>;}
 
 export function Layout({onLogout,children}:{onLogout:()=>void;children?:ReactNode}){
@@ -21,6 +21,7 @@ export function Layout({onLogout,children}:{onLogout:()=>void;children?:ReactNod
   const nav=[{to:'/',key:'home' as Key,icon:LayoutDashboard},{to:'/news',key:'news' as Key,icon:Newspaper},{to:'/employees',key:'people' as Key,icon:Users},{to:'/structure',key:'structure' as Key,icon:Network},{to:'/documents',key:'documents' as Key,icon:FileText}];
   const current=nav.find(item=>item.to==='/'?location.pathname==='/':location.pathname.startsWith(item.to));
   const section=current?.key??(location.pathname.startsWith('/hr')?'management':location.pathname.startsWith('/admin')?'admin':location.pathname.startsWith('/profile')?'profile':location.pathname.startsWith('/trash')?'trash':'search');
+  useEffect(()=>{document.title=`${t(section)} · Toshkent Invest`;},[section,locale,t]);
   useEffect(()=>setMenu(false),[location.pathname]);
   useEffect(()=>{if(menu)menuClose.current?.focus();},[menu]);
   const closeMenu=()=>{setMenu(false);menuButton.current?.focus();};

@@ -60,3 +60,34 @@ def test_stable_number_update_detects_intervening_change(hr,org):
 def test_employee_cannot_preview_or_commit_import(employee):
     _,_,api=employee
     assert api.post('/api/v1/employees/import/preview',{'fileId':'00000000-0000-0000-0000-000000000000'}).status_code==403
+
+def test_preview_reports_entered_and_resolved_references_and_field_codes(hr,org):
+    _,_,api=hr
+    f=make_file(hr,[['','Resolved row','Specialist',org[1].name,org[0].name],['','Broken row','Specialist','missing unit',org[0].name]])
+    f.parsed_data={'headers':['employeeNumber','displayName','positionTitle','unit','office','birthday'],'rows':[r+['31.02.2000'] if i else r+[''] for i,r in enumerate(f.parsed_data['rows'])]}
+    f.save()
+    p=api.post('/api/v1/employees/import/preview',{'fileId':str(f.id)}).json()
+    good,bad=p['rows']
+    assert good['resolved']=={'unit':org[1].name,'office':org[0].name} and good['entered']['unit']==org[1].name
+    assert bad['resolved']['unit'] is None and bad['resolved']['office']==org[0].name and bad['entered']['unit']=='missing unit'
+    assert {(e['field'],e['code']) for e in bad['errors']}=={('unit','UNKNOWN_OR_AMBIGUOUS_REFERENCE'),('birthday','INVALID_DATE')}
+
+def test_row_validation_errors_carry_machine_readable_codes(hr,org):
+    _,_,api=hr
+    f=make_file(hr,[['','X','Specialist',org[1].name,org[0].name]])
+    f.parsed_data={'headers':['displayName','positionTitle','unit','office','birthday','mobilePhone'],'rows':[['X','Specialist',org[1].name,org[0].name,'2000-13-45','12']]}
+    f.save()
+    issue=[e for e in api.post('/api/v1/employees/import/preview',{'fileId':str(f.id)}).json()['rows'][0]['errors'] if e['field']=='row'][0]
+    assert issue['fieldCodes']=={'displayName':['min_length'],'birthday':['invalid'],'mobilePhone':['phone_short']}
+    assert 'wrong format' in issue['details']['birthday'][0]  # the raw text stays for older clients
+
+def test_api_validation_errors_add_field_codes_without_changing_details(hr):
+    _,_,api=hr
+    response=api.post('/api/v1/news',{'title':'','body':'<p>x</p>','publishedAt':'2026-01-02T00:00:00Z','expiresAt':'2026-01-01T00:00:00Z','bogus':1})
+    body=response.json()
+    assert response.status_code==400 and body['code']=='VALIDATION_ERROR' and isinstance(body['details'],dict)
+    assert body['fieldCodes']['bogus']=='unknown_field'
+    nested=api.post('/api/v1/news',{'title':'t','body':'<p>x</p>','translations':{'ru':{'title':'x'*400}}}).json()
+    assert nested['fieldCodes']=={'translations':{'title':['max_length']}}
+    dates=api.post('/api/v1/news',{'title':'t','body':'<p>x</p>','publishedAt':'2026-01-02T00:00:00Z','expiresAt':'2026-01-01T00:00:00Z'}).json()
+    assert dates['fieldCodes']=={'expiresAt':['expires_before_publish']}

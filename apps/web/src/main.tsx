@@ -22,6 +22,7 @@ function App(){
   const refreshMe=useCallback(async()=>{try{const value=await api<Me>('/me');setMe(value);applyLocale(chooseLocale(localePreference.current,value.locale));}catch(e){if(e instanceof ApiError&&e.status===401)setMe(null);else throw e;}finally{setLoading(false);}},[applyLocale]);
   useEffect(()=>{void refreshMe().catch(()=>setLoading(false));const expired=()=>setMe(null);window.addEventListener('portal-session-expired',expired);return()=>window.removeEventListener('portal-session-expired',expired);},[refreshMe]);
   const t=(key:Key)=>dictionaries[locale][key];
+  useEffect(()=>{if(!me||me.mustChangePassword||(me.mfaRequired&&!me.mfaVerified))document.title=`${t(me?'security':'signIn')} · Toshkent Invest`;},[me,locale]);
   if(loading)return <div className="app-loading"><span className="brand-mark"/><LoaderCircle className="spin"/><p>{t('loading')}</p></div>;
   if(!me)return <Login locale={locale} setLocale={setLocale} onLogin={refreshMe}/>;
   if(me.mustChangePassword||(me.mfaRequired&&!me.mfaVerified))return <SecurityGate me={me} locale={locale} setLocale={setLocale} refreshMe={refreshMe}/>;

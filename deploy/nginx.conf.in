@@ -27,6 +27,14 @@ http {
     ssl_session_tickets off;
 @@NETWORK_ACL@@
     limit_req_status 429;
+    # An oversized upload is refused by nginx itself; answer in the API's error shape so the SPA can show its message.
+    error_page 413 @upload_too_large;
+    location @upload_too_large {
+      default_type application/json;
+      add_header Cache-Control "no-store" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      return 413 '{"code":"UPLOAD_SIZE_LIMIT"}';
+    }
     limit_conn connections 30;
     location ^~ /api/internal/ { return 404; }
     location = /api/v1/auth/login {

@@ -436,7 +436,8 @@ td select { font-size: 13px; min-width: 145px; min-height: 38px; padding: 8px; }
 .search-news-row h3 { font-size: 17px; margin-bottom: 8px; }
 .search-news-row p { font-size: 14px; margin: 0; }
 .search-news-row > svg { position: absolute; right: 20px; top: 25px; color: #8b9fc6; }
-.search-snippet { font-size: 13px; line-height: 1.7; margin: 12px 0 0; max-height: 4em; overflow: hidden; }
+.search-snippet { font-size: 13px; line-height: 1.7; margin: 12px 0 0; max-height: 6.8em; overflow: hidden; }
+.search-snippet mark { background: #ffe58a; color: inherit; border-radius: 3px; padding: 0 2px; }
 
 /* Shared authoring forms, duplicate review and file processing. */
 .field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 20px; min-width: 0; }
@@ -850,3 +851,5 @@ td select { font-size: 13px; min-width: 145px; min-height: 38px; padding: 8px; }
 .locale-picker{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;color:#53627c}.locale-picker select{min-height:44px;width:112px;padding:8px 5px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer}.locale-picker select:focus-visible{outline:2px solid #3157ef;outline-offset:2px}
 
 .header-back{min-width:44px;justify-content:center}@media(max-width:480px){.page-breadcrumb{display:none}.locale-picker select{width:94px}.locale-picker{gap:3px}}
+.cell-error { color: #b42318; font-weight: 600; }
+.scheduled-note { margin: 0 0 10px; }

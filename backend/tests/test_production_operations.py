@@ -49,6 +49,7 @@ def test_configuration_creates_independent_private_secrets_and_validates_real_tl
     assert len((root/'.deploy/keys/backup.key').read_bytes())==32
     nginx=(root/'.deploy/nginx.conf').read_text()
     assert 'allow 10.8.0.0/24;' in nginx and 'deny all;' in nginx and '@@' not in nginx
+    assert 'error_page 413 @upload_too_large;' in nginx and 'default_type application/json;' in nginx  # rendered config keeps the JSON 413
     original=(root/'.deploy/portal.env').read_bytes()
     with pytest.raises(ConfigurationError,match='already exists'):configure(root,'https://portal.test.internal','10.20.0.10',['10.20.0.0/16'],cert,key)
     assert (root/'.deploy/portal.env').read_bytes()==original
@@ -366,3 +367,16 @@ def test_configuration_allows_isolated_recovery_project_and_rejects_command_text
     configure(root, 'https://portal.test.internal', '127.0.0.1', ['127.0.0.1/32'], cert, key, project_name='portal-recovery-acceptance')
     from operations.configuration import read_environment
     assert read_environment(root/'.deploy/portal.env')['COMPOSE_PROJECT_NAME'] == 'portal-recovery-acceptance'
+
+
+def test_nginx_answers_oversize_uploads_with_the_api_error_shape():
+    import json,re
+    template=(ROOT/'deploy/nginx.conf.in').read_text()
+    assert re.search(r'client_max_body_size 21m;',template)  # 20 MB file plus multipart overhead
+    named=re.search(r'location @upload_too_large \{(.*?)\n    \}',template,re.S).group(1)
+    assert 'default_type application/json;' in named and 'X-Content-Type-Options "nosniff" always;' in named and 'Cache-Control "no-store" always;' in named
+    body=re.search(r"return 413 '(.*)';",named).group(1)
+    assert json.loads(body)=={'code':'UPLOAD_SIZE_LIMIT'}
+    server=template[template.index('server {'):]
+    assert server.index('error_page 413 @upload_too_large;')<server.index('location ^~ /api/internal/')  # declared once for the whole server
+    assert template.count('error_page 413')==1 and 'proxy_intercept_errors' not in template  # application answers are never rewritten

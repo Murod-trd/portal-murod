@@ -12,7 +12,7 @@ export type Birthday = Generated.BirthdayResponse;
 export type FileState = Generated.FileStateResponse;
 export type UserAccount = Generated.UserAccountResponse;
 export type TrashItem = Generated.TrashItemResponse;
-export class ApiError extends Error { constructor(public code:string,public status:number,public details?:unknown){ super(code); } }
+export class ApiError extends Error { constructor(public code:string,public status:number,public details?:unknown,public fieldCodes?:unknown){ super(code); } }
 let token='';
 export function setCsrf(value:string){token=value;}
 export function query(values:Record<string,unknown>):string{const p=new URLSearchParams();for(const[k,v]of Object.entries(values))if(v!==''&&v!==undefined&&v!==null&&v!==false)p.set(k,String(v));return p.size?'?'+p.toString():'';}
@@ -22,8 +22,8 @@ export async function api<T>(path:string,method='GET',body?:unknown,signal?:Abor
   if(body!==undefined&&!(body instanceof FormData))headers['Content-Type']='application/json';
   const response=await fetch('/api/v1'+path,{method,headers,credentials:'same-origin',body:body===undefined?undefined:body instanceof FormData?body:JSON.stringify(body),signal,cache:'no-store'});
   let data:Record<string,unknown>;
-  try { const parsed:unknown=await response.json(); if(!parsed||typeof parsed!=='object')throw new Error(); data=parsed as Record<string,unknown>; } catch { throw new ApiError('INVALID_RESPONSE',response.status); }
-  if(!response.ok){if(response.status===401&&path!=='/auth/login')window.dispatchEvent(new Event('portal-session-expired'));throw new ApiError(typeof data.code==='string'?data.code:'REQUEST_FAILED',response.status,data.details);}
+  try { const parsed:unknown=await response.json(); if(!parsed||typeof parsed!=='object')throw new Error(); data=parsed as Record<string,unknown>; } catch { throw new ApiError(response.status===413?'UPLOAD_SIZE_LIMIT':'INVALID_RESPONSE',response.status); }  // a proxy's own 413 page is not JSON
+  if(!response.ok){if(response.status===401&&path!=='/auth/login')window.dispatchEvent(new Event('portal-session-expired'));throw new ApiError(typeof data.code==='string'?data.code:'REQUEST_FAILED',response.status,data.details,data.fieldCodes);}
   if(typeof data.csrfToken==='string')setCsrf(data.csrfToken);
   return data as T;
 }

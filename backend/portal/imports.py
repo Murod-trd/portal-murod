@@ -3,7 +3,7 @@ import json
 from django.utils import timezone
 from . import models as m
 from .domain import normalize,spreadsheet_restore
-from .errors import PortalError
+from .errors import PortalError, error_codes
 from .security import audit,domain_write
 from .serializers import EmployeeInput
 from .services import get_or_error,duplicate_names,save_employee
@@ -59,8 +59,10 @@ def preview_import(user,file_id,mapping=None):
         row_errors=[]
         if data.get('displayName','').startswith(('ПРИМЕР:','NAMUNA:','EXAMPLE:')):
             row_errors.append({'field':'displayName','code':'TEMPLATE_EXAMPLE_NOT_REPLACED'})
+        resolved={}
         for field,model in [('unit',m.OrgUnit),('office',m.Office)]:
             found=list(model.objects.filter(normalized_name=normalize(row.get(field,'')),active=True)[:2])
+            resolved[field]=found[0].name if len(found)==1 else None
             if len(found)!=1:
                 row_errors.append({'field':field,'code':'UNKNOWN_OR_AMBIGUOUS_REFERENCE'})
             else:
@@ -70,6 +72,7 @@ def preview_import(user,file_id,mapping=None):
             manager=m.Employee.objects.filter(employee_number=manager_number,status='ACTIVE').first()
             if manager:
                 data['managerId']=str(manager.id)
+                resolved['manager']=manager.display_name
             else:
                 row_errors.append({'field':'managerNumber','code':'INVALID_MANAGER'})
         if row.get('birthday') and '.' in row['birthday']:
@@ -80,7 +83,11 @@ def preview_import(user,file_id,mapping=None):
                 row_errors.append({'field':'birthday','code':'INVALID_DATE'})
         serializer=EmployeeInput(data=data)
         if not serializer.is_valid():
-            row_errors.append({'field':'row','code':'VALIDATION_ERROR','details':serializer.errors})
+            # A reference or date already reported above is not reported a second time as a missing/invalid serializer field.
+            covered={{'unit':'unitId','office':'officeId','managerNumber':'managerId','birthday':'birthday'}.get(e['field']) for e in row_errors}
+            remaining={key:value for key,value in serializer.errors.items() if key not in covered}
+            if remaining:
+                row_errors.append({'field':'row','code':'VALIDATION_ERROR','details':remaining,'fieldCodes':error_codes(remaining)})
         existing=None
         if row.get('employeeNumber'):
             existing=m.Employee.objects.filter(employee_number=row['employeeNumber']).first()
@@ -89,7 +96,7 @@ def preview_import(user,file_id,mapping=None):
         matches=duplicate_names(data.get('displayName',''),existing.pk if existing else None)
         # A repeated name inside this same file must also be explicitly confirmed.
         in_file=any(normalize(p['data'].get('displayName',''))==normalize(data.get('displayName','')) for p in prepared)
-        prepared.append({'row':numbers[index],'data':data,'employeeNumber':row.get('employeeNumber',''),'existingId':str(existing.id) if existing else None,'updatedAt':existing.updated_at.isoformat() if existing else None,'matches':matches,'sameNameInFile':in_file,'errors':row_errors,'suggestedAction':'UPDATE' if existing else ('CHOOSE' if matches or in_file else 'NEW')})
+        prepared.append({'row':numbers[index],'data':data,'employeeNumber':row.get('employeeNumber',''),'existingId':str(existing.id) if existing else None,'updatedAt':existing.updated_at.isoformat() if existing else None,'matches':matches,'sameNameInFile':in_file,'errors':row_errors,'entered':{key:row.get(key,'') for key in ['unit','office','managerNumber']},'resolved':resolved,'suggestedAction':'UPDATE' if existing else ('CHOOSE' if matches or in_file else 'NEW')})
         if row_errors:
             errors.append({'row':numbers[index],'errors':row_errors})
     digest=hashlib.sha256(json.dumps(prepared,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
