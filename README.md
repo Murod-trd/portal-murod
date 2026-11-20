@@ -17,7 +17,7 @@ Backend и worker: Python/Django/DRF. Frontend: статический React/Typ
 
 ## Изменения rc.10
 
-Подготовленный PostgreSQL target заменяет Go-helper gosu на Alpine su-exec. Подготовленный frontend-tools заменяет bundled npm на SHA-512-закреплённые npm/undici. Установщик собирает эти targets; сканер дополнен строгой инвентаризацией prepared-образов. Прежний строгий upstream-скан сохранён. Подробности и оставшиеся блокеры: [SUPPLY_SECURITY_RU.md](docs/SUPPLY_SECURITY_RU.md).
+Подготовленный PostgreSQL target заменяет Go-helper gosu на Alpine su-exec. На сервере нет Node/npm: фронтенд собирается в CI, релиз приходит с готовым `frontend-dist/`, сервер только проверяет его SHA-256 на Python ([ADR 004](docs/adr/004-no-node-on-server.md)). Установщик собирает PostgreSQL/API/worker; сканер дополнен строгой инвентаризацией prepared-образов. Прежний строгий upstream-скан сохранён. Подробности и оставшиеся блокеры: [SUPPLY_SECURITY_RU.md](docs/SUPPLY_SECURITY_RU.md).
 
 Frontend-сборка теперь записывает хеши входных файлов и артефактов. Упаковщик умеет включать статическую сборку через `--include-frontend` и отказывается от несовпадающей/устаревшей сборки. Код этих изменений ещё не исполнялся.
 
