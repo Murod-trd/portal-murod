@@ -19,11 +19,12 @@ python backend/manage.py spectacular --validate --fail-on-warn --file /tmp/porta
 python backend/manage.py generate_api_types --check
 npm run typecheck
 npm run lint
-node scripts/test_frontend_audit.mjs
+npm run test:web
 npm run build:web
+python operations/frontend_dist.py
 ```
 
-Последняя команда запускает Vite через `scripts/build_frontend.mjs`. При неуспехе или изменении исходников в процессе provenance не выдаётся. Успешная сборка создаёт `frontend-dist/BUILD-PROVENANCE.json`: хеши исходников и всех статических артефактов. Это подтверждение происхождения сборки, не серверная/браузерная приёмка.
+`npm run build:web` запускает Vite через `apps/web/scripts/build.mjs` (только CI/машина разработчика, не сервер); `operations/frontend_dist.py` перепроверяет результат на Python так же, как сборка образа на сервере. При неуспехе или изменении исходников в процессе provenance не выдаётся. Успешная сборка создаёт `frontend-dist/BUILD-PROVENANCE.json`: хеши исходников и всех статических артефактов. Это подтверждение происхождения сборки, не серверная/браузерная приёмка.
 
 Дополнительно проверить новые сценарии: отказ загрузчика инструментов при неправильном SHA/redirect/path traversal/символической ссылке; отказ упаковщика при устаревшем frontend, изменённом asset, symlink и несовпадении состава файлов. Проверки downloader входят в 283 PostgreSQL-теста; 10 stdlib packaging-тестов прошли отдельно. `--include-frontend` выполнен и архив-кандидат проверен извлечением, manifest/CRC/UTF-8/secret scan.
 

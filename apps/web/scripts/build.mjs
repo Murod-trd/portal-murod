@@ -5,7 +5,7 @@ import {lstat, readdir, readFile, writeFile, rename, unlink} from 'node:fs/promi
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const output=path.join(root,'frontend-dist');
 const digest=async file=>createHash('sha256').update(await readFile(file)).digest('hex');
 async function files(directory,prefix='',source=false){
@@ -21,7 +21,7 @@ async function files(directory,prefix='',source=false){
   return result.sort();
 }
 const sourceFiles=async()=>[...(await files(path.join(root,'apps/web'),'',true)).map(name=>'apps/web/'+name),
-  'package.json','package-lock.json','RELEASE','scripts/build_frontend.mjs'].sort();
+  'package.json','package-lock.json','RELEASE'].sort();
 const sources=await sourceFiles(),sourceSha256={};
 for(const name of sources)sourceSha256[name]=await digest(path.join(root,name));
 await unlink(path.join(output,'BUILD-PROVENANCE.json')).catch(error=>{if(error.code!=='ENOENT')throw error;});

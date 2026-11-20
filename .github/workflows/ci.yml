@@ -53,6 +53,7 @@ jobs:
       - name: Packager tests
         run: python -m unittest operations.test_package_release
   frontend:
+    # The only place Node runs: CI (or a developer machine). Servers receive static files.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -61,8 +62,63 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm run lint
-      - run: node scripts/test_frontend_audit.mjs
+      - run: npm run test:web
       - run: npm run build:web
+      - name: Verify the static bundle in Python, as the server image build does
+        run: python operations/frontend_dist.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  release-package:
+    needs: [backend, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist
+      - name: Package the release with the prebuilt frontend (no Node on the server)
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          python operations/package_release.py --include-frontend --output "$RUNNER_TEMP/release/toshkent-portal-$(cat RELEASE)-${GITHUB_SHA::12}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: 30
+  server-images:
+    # Proves the server images build from the prebuilt bundle without Node or npm.
+    needs: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist
+      - name: Build API and worker images
+        run: |
+          docker build --target api -t portal-ci-api .
+          docker build --target worker -t portal-ci-worker .
+      - name: Runtime images contain no Node or npm
+        run: |
+          for image in portal-ci-api portal-ci-worker; do
+            docker run --rm --network none --entrypoint sh "$image" -ec '! command -v node && ! command -v npm && test -f frontend-dist/index.html'
+          done

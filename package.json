@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "python3 scripts/dev.py",
     "build": "npm run build:web",
-    "build:web": "node scripts/build_frontend.mjs",
+    "build:web": "node apps/web/scripts/build.mjs",
     "typecheck": "tsc --noEmit -p apps/web/tsconfig.json",
-    "lint": "eslint apps/web",
+    "lint": "eslint --config apps/web/eslint.config.js apps/web",
+    "test:web": "node apps/web/tests/audit.mjs",
     "test": "python3 -m pytest backend/tests -q",
     "setup": "python3 scripts/setup.py",
     "check:backend": "python3 backend/manage.py check",

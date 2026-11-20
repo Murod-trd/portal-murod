@@ -5,11 +5,10 @@
   "images": {
     "postgres": "library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a",
     "python": "library/python:3.12-alpine3.24@sha256:e6dae589c1c05976188fd3bd019afd091445fc533ed2ea29001beddc7368a9c8",
-    "node": "library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a",
     "nginx": "library/nginx:stable-alpine-slim@sha256:dede8895648b461178c3bc604f7eed4423efe5220b2c4d839f5eb3d34ac3f8f7",
     "clamav": "clamav/clamav:stable@sha256:bda39705e291105049c3936e2803ac90b955172af8030f94f05dce1252df6c6d"
   },
-  "note": "Immutable actual rootfs inputs. postgres/node are clean Alpine aliases: signed PostgreSQL 17.12 APK packages and the official SHA-256-pinned Node 24.22.2 musl executable are installed separately. No gosu or bundled upstream npm image is used. All base/prepared/final gates remain strict; no CVE exceptions. Storage-family change requires logical dump/restore into a separate volume, not an in-place update.",
+  "note": "Immutable actual rootfs inputs. postgres is a clean Alpine alias with signed PostgreSQL 17.12 APK packages; no gosu. Servers never run Node/npm: the static frontend is compiled in CI or on a developer machine and shipped as SHA-256-bound files in the release. All base/prepared/final gates remain strict; no CVE exceptions. Storage-family change requires logical dump/restore into a separate volume, not an in-place update.",
   "postgresStorageFamily": "postgresql17-apk-alpine3.24",
   "postgresPackages": {
     "postgresql17": "17.12-r0",

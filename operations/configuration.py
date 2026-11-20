@@ -111,9 +111,9 @@ def configure(root,origin,bind,networks,cert,key,validate_tls=True,backup_direct
     if (directory/'portal.env').exists():raise ConfigurationError('Configuration already exists; secrets were preserved. Use the existing installation.')
     cert_bytes,key_bytes=validate_certificate(cert,key,hostname) if validate_tls else (Path(cert).read_bytes(),Path(key).read_bytes())
     images=json.loads((root/'deploy/images.lock.json').read_text())
-    required={'python','node','postgres','nginx','clamav'}
+    required={'python','postgres','nginx','clamav'}
     if set(images['images'])!=required or any(not re.fullmatch(r'[a-zA-Z0-9./:_-]+@sha256:[0-9a-f]{64}',image) for image in images['images'].values()):
-        raise ConfigurationError('Image lock must contain all five immutable references')
+        raise ConfigurationError('Image lock must contain all four immutable references')
     installation_id=secrets.token_hex(16)
     family=validate_postgres_lock(images)
     values={'PORTAL_INSTALLATION_ID':installation_id,'PORTAL_IMAGE_PREFIX':project_name,'PORTAL_RELEASE':(root/'RELEASE').read_text().strip(),'COMPOSE_PROJECT_NAME':project_name,'APP_ENV':'production','APP_ORIGIN':origin,'ALLOWED_HOSTS':hostname,'BIND_ADDRESS':bind,'TLS_PORT':str(port),'STORAGE_DRIVER':'filesystem','REQUIRE_MFA':'none','REQUIRE_PASSWORD_CHANGE':'false','SESSION_TTL_SECONDS':'43200','SESSION_IDLE_SECONDS':'43200','PRIVATE_STORAGE_DIR':'/var/lib/portal/files','BACKUP_RETENTION_DAYS':'14'}

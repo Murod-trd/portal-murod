@@ -1,40 +1,19 @@
-# Node is used solely in this disposable frontend compiler stage.
-ARG NODE_IMAGE=alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+# Servers never run Node, npm or other JavaScript tooling. The static browser bundle
+# (frontend-dist/) is compiled in CI or on a developer machine and arrives in the release;
+# here Python only checks its SHA-256 provenance against the shipped sources.
 ARG PYTHON_IMAGE=python:3.12-alpine3.24@sha256:e6dae589c1c05976188fd3bd019afd091445fc533ed2ea29001beddc7368a9c8
 ARG POSTGRES_IMAGE=alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
-# Download/authenticate archives before copying compiler tools into Node.
-FROM ${PYTHON_IMAGE} AS build-tools-download
-COPY deploy/build-tools.lock.json /build-tools.lock.json
-COPY scripts/prepare_build_tools.py /prepare_build_tools.py
-COPY scripts/verified_https.py /verified_https.py
-RUN python /prepare_build_tools.py --lock /build-tools.lock.json --destination /verified
-COPY deploy/node-runtime.lock.json /node-runtime.lock.json
-COPY scripts/prepare_node.py /prepare_node.py
-RUN python /prepare_node.py --lock /node-runtime.lock.json --destination /verified-node
+FROM ${PYTHON_IMAGE} AS python-tools
 
-# Clean Alpine rootfs; no upstream Node/npm container is a build input.
-FROM ${NODE_IMAGE} AS frontend-tools
-RUN apk add --no-cache libstdc++
-COPY --from=build-tools-download /verified-node/node /usr/local/bin/node
-COPY --from=build-tools-download /verified-node/LICENSE /usr/share/licenses/node/LICENSE
-COPY --from=build-tools-download /verified/npm /usr/local/lib/node_modules/npm
-RUN rm -rf /usr/local/lib/node_modules/npm/node_modules/undici
-COPY --from=build-tools-download /verified/undici /usr/local/lib/node_modules/npm/node_modules/undici
-COPY deploy/build-tools.lock.json /usr/share/portal/build-tools.lock.json
-COPY deploy/node-runtime.lock.json /usr/share/portal/node-runtime.lock.json
-RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
- && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
- && node --version && npm --version
-
-FROM frontend-tools AS frontend
-WORKDIR /build
-COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+# Source files are hashed here as data only; nothing in this stage reaches the runtime image.
+FROM ${PYTHON_IMAGE} AS frontend
+WORKDIR /check
+COPY package.json package-lock.json RELEASE ./
 COPY apps/web ./apps/web
-COPY RELEASE ./RELEASE
-COPY scripts/build_frontend.mjs ./scripts/build_frontend.mjs
-RUN npm run build:web
+COPY frontend-dist ./frontend-dist
+COPY operations/frontend_dist.py ./operations/frontend_dist.py
+RUN python operations/frontend_dist.py --root /check
 
 # Signed PostgreSQL 17 APK packages on a clean rootfs. Upstream entrypoint is vendored
 # with its MIT license and the already-tested su-exec substitution.
@@ -90,7 +69,7 @@ COPY backend/portal ./backend/portal
 COPY backend/manage.py ./backend/manage.py
 COPY operations ./operations
 COPY RELEASE ./RELEASE
-COPY --from=frontend /build/frontend-dist ./frontend-dist
+COPY --from=frontend /check/frontend-dist ./frontend-dist
 USER 10001:10001
 EXPOSE 8000
 CMD ["gunicorn","--chdir","backend","config.wsgi:application","--bind","0.0.0.0:8000","--workers","2","--threads","2","--timeout","60","--max-requests","500","--max-requests-jitter","50","--worker-tmp-dir","/tmp","--no-control-socket"]
@@ -115,7 +94,7 @@ FROM worker AS verification
 USER root
 RUN apk add --no-cache openssl
 COPY requirements-dev.lock ./
-COPY --from=build-tools-download /usr/local/lib/python3.12/ensurepip /usr/local/lib/python3.12/ensurepip
+COPY --from=python-tools /usr/local/lib/python3.12/ensurepip /usr/local/lib/python3.12/ensurepip
 RUN python -m ensurepip && python -m pip install --no-cache-dir --require-hashes -r requirements-dev.lock
 COPY . /app
 USER 10001:10001

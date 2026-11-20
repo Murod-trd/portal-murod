@@ -35,41 +35,25 @@ def inspect_prepared_platform(reference, kind, root):
     command=['docker','run','--rm','--network','none','--read-only','--cap-drop','ALL',
              '--security-opt','no-new-privileges','--memory','256m','--pids-limit','64']
     try:
-        if kind=='frontend-tools':
-            script='''const fs=require('node:fs'),crypto=require('node:crypto');
-const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
-const hash=crypto.createHash('sha256'),buffer=Buffer.alloc(1024*1024),fd=fs.openSync('/usr/local/bin/node','r');
-let size;while((size=fs.readSync(fd,buffer,0,buffer.length,null))>0)hash.update(buffer.subarray(0,size));fs.closeSync(fd);
-console.log(JSON.stringify({lock:read('/usr/share/portal/build-tools.lock.json'),
-npm:read('/usr/local/lib/node_modules/npm/package.json').version,
-undici:read('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version,
-node:process.version,nodeLock:read('/usr/share/portal/node-runtime.lock.json'),nodeSha256:hash.digest('hex')}));'''
-            report=json.loads(subprocess.check_output(command+['--entrypoint','node',reference,'-e',script],text=True,timeout=60))
-            expected=json.loads((root/'deploy/build-tools.lock.json').read_text())
-            node=json.loads((root/'deploy/node-runtime.lock.json').read_text())
-            report['passed']=(report['lock']==expected and report['npm']==expected['packages']['npm']['version']
-                              and report['undici']==expected['packages']['undici']['version']
-                              and report['nodeLock']==node and report['node']=='v'+node['version']
-                              and report['nodeSha256']==node['binarySha256'])
-        else:
-            script='''test ! -e /usr/local/bin/gosu
+        if kind!='postgres':raise ValueError('Only the prepared PostgreSQL platform is inventoried')
+        script='''test ! -e /usr/local/bin/gosu
 grep -F 'exec su-exec postgres "$BASH_SOURCE" "$@"' /usr/local/bin/docker-entrypoint.sh >/dev/null
 if grep -q gosu /usr/local/bin/docker-entrypoint.sh; then exit 1; fi
 command -v su-exec
 postgres --version
 sha256sum /usr/local/bin/docker-entrypoint.sh'''
-            lines=subprocess.check_output(command+['--entrypoint','sh',reference,'-ec',script],text=True,timeout=60).strip().splitlines()
-            if len(lines)!=3:raise ValueError('Unexpected PostgreSQL inventory')
-            expected=json.loads((root/'deploy/images.lock.json').read_text())['postgresPackages']
-            entrypoint=json.loads((root/'deploy/postgres/UPSTREAM.json').read_text())
-            packages=json.loads(subprocess.check_output(command+['--entrypoint','apk',reference,'--no-network',
-                                'query','--from','installed','--fields','name,version','--format','json',*sorted(expected)],text=True,timeout=60))
-            if not isinstance(packages,list) or len(packages)!=len(expected):raise ValueError('Missing installed PostgreSQL package/helper')
-            actual={package['name']:package['version'] for package in packages}
-            report={'helper':lines[0],'packages':packages,'postgres':lines[1],'entrypointSha256':lines[2].split()[0]}
-            report['passed']=(report['helper']=='/sbin/su-exec' and actual==expected
-                              and report['postgres']=='postgres (PostgreSQL) '+expected['postgresql17'].split('-r')[0]
-                              and report['entrypointSha256']==entrypoint['patchedSha256'])
+        lines=subprocess.check_output(command+['--entrypoint','sh',reference,'-ec',script],text=True,timeout=60).strip().splitlines()
+        if len(lines)!=3:raise ValueError('Unexpected PostgreSQL inventory')
+        expected=json.loads((root/'deploy/images.lock.json').read_text())['postgresPackages']
+        entrypoint=json.loads((root/'deploy/postgres/UPSTREAM.json').read_text())
+        packages=json.loads(subprocess.check_output(command+['--entrypoint','apk',reference,'--no-network',
+                            'query','--from','installed','--fields','name,version','--format','json',*sorted(expected)],text=True,timeout=60))
+        if not isinstance(packages,list) or len(packages)!=len(expected):raise ValueError('Missing installed PostgreSQL package/helper')
+        actual={package['name']:package['version'] for package in packages}
+        report={'helper':lines[0],'packages':packages,'postgres':lines[1],'entrypointSha256':lines[2].split()[0]}
+        report['passed']=(report['helper']=='/sbin/su-exec' and actual==expected
+                          and report['postgres']=='postgres (PostgreSQL) '+expected['postgresql17'].split('-r')[0]
+                          and report['entrypointSha256']==entrypoint['patchedSha256'])
         return report
     except (OSError,subprocess.SubprocessError,ValueError,KeyError,TypeError,IndexError) as error:
         return {'passed':False,'errorType':type(error).__name__}
@@ -95,7 +79,7 @@ def main():
         source = 'remote'
     else:
         release = (root/'RELEASE').read_text().strip()
-        kinds=['postgres','frontend-tools'] if args.scope=='prepared' else ['api','worker']
+        kinds=['postgres'] if args.scope=='prepared' else ['api','worker']
         images = {kind: args.image_prefix+'-'+kind+':'+release for kind in kinds}
         source = 'docker'
     version = subprocess.check_output([args.trivy, '--version'], text=True).splitlines()[0]

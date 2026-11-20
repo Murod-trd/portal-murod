@@ -6,12 +6,12 @@
 
 ## Реальные входы сборки
 
-`deploy/images.lock.json` закрепляет фактические rootfs. PostgreSQL и Node aliases используют один чистый Alpine 3.24 digest, не прежние upstream контейнеры с gosu/bundled npm. Пять именованных параметров сохранены; уникальных rootfs четыре.
+`deploy/images.lock.json` закрепляет фактические rootfs. PostgreSQL alias использует чистый Alpine 3.24 digest, не прежний upstream контейнер с gosu. С 20.11.2026 Node/npm на сервере не используются вовсе ([ADR 004](adr/004-no-node-on-server.md)): закреплены четыре образа.
 
 - PostgreSQL **17.12-r0** (server/client/contrib) и su-exec **0.3-r0** устанавливаются из подписанных Alpine APK. Вендорный MIT upstream entrypoint сохранён с единственной заменой gosu на su-exec; исходный commit, SHA-256 и лицензия — deploy/postgres/UPSTREAM.json и LICENSE. Реальные версии пакетов/сервера/entrypoint проверяются инвентаризацией, не тегом образа.
 - Новый `POSTGRES_STORAGE_FAMILY=postgresql17-apk-alpine3.24` привязан к package major. Upstream→APK, major или OS-family переход на прежнем PGDATA запрещён. Копии покрывают family HMAC-подписью; несовпадение/отсутствие family при восстановлении в новую семью отклоняется до изменения сервисов. Переход — только отдельная логическая миграция в новые тома.
-- Node **24.22.2** — официальный musl-архив nodejs.org из deploy/node-runtime.lock.json. Python downloader проверяет полный archive SHA-256, exact bin/node + LICENSE, регулярность/уникальность файлов, лимиты и binary SHA-256/ELF x86_64. Bundled npm/yarn не извлекаются и не исполняются. Подпись PGP checksum-list отдельно проверенной не заявляется.
-- npm **12.2.1** и undici **6.29.1** загружаются из официального registry с отдельным полным SHA-512, ограничениями безопасной распаковки и проверкой имени/версии. Старые инструменты не используются для установки новых. Node/npm существуют только в одноразовом frontend builder, не в production backend.
+- *(до 20.11.2026, удалено)* Node **24.22.2** — официальный musl-архив nodejs.org из deploy/node-runtime.lock.json. Python downloader проверяет полный archive SHA-256, exact bin/node + LICENSE, регулярность/уникальность файлов, лимиты и binary SHA-256/ELF x86_64. Bundled npm/yarn не извлекаются и не исполняются. Подпись PGP checksum-list отдельно проверенной не заявляется.
+- *(до 20.11.2026, удалено)* npm **12.2.1** и undici **6.29.1** загружались из официального registry с отдельным полным SHA-512, ограничениями безопасной распаковки и проверкой имени/версии. Старые инструменты не используются для установки новых. Node/npm существуют только в одноразовом frontend builder, не в production backend.
 - Зависимости Python устанавливаются по hash-lock. pip/ensurepip удаляются целиком из финальных runtime API/worker; verification target получает инструменты отдельно. Tesseract **5.5.4** собирается по закреплённому upstream source SHA; инвентаризируются версия и бинарный SHA, поскольку общий ОС-скан не доказывает анализ самодельного бинарника OCR.
 
 ## Подтверждённые результаты
@@ -20,7 +20,7 @@
 |---|---|---|
 | Пять базовых aliases | 0/0 | Неизменённая Python base: 5 Medium/1 Low |
 | Подготовленный PostgreSQL | 0/0 | Находок нет |
-| Одноразовый frontend-tools | 0/0 | 3 Medium сохранены: glob, ip-address, minimatch; см. raw report |
+| Одноразовый frontend-tools (удалён 20.11.2026) | 0/0 | 3 Medium сохранены: glob, ip-address, minimatch; см. raw report |
 | Окончательные API и worker | 0/0 | Находок нет по использованной базе Trivy |
 
 Проектные npm-зависимости при чистом npm ci: 0 vulnerabilities. Bandit: 0 High, 0 Medium, 78 Low, без nosec. Наличие Medium у одноразовых инструментов не скрывается и не означает прохождения независимой внешней приёмки.
