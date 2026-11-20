@@ -14,7 +14,7 @@ runtime=root/'.runtime'
 if not (runtime/'config.json').exists():
     subprocess.run([str(python),'scripts/setup.py'],check=True)
 if not (root/'frontend-dist/index.html').exists():
-    subprocess.run(['npm','run','build:web'],check=True)
+    raise SystemExit('Build the static frontend first on this developer machine: npm run build:web (Python never starts Node).')
 port=os.environ.get('PORT','3000')
 host=os.environ.get('HOST','127.0.0.1')
 environment={**os.environ,'WORKER_API_URL':f'http://127.0.0.1:{port}'}

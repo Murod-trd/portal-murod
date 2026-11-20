@@ -119,7 +119,7 @@ class Acceptance:
 
     def native(self):
         controller=self.controllers[0];env,cwd=controller.process_environment,controller.root
-        self.execute('build-native',controller.command('build','postgres','frontend-tools','app','worker','verification'),cwd=cwd,environment=env)
+        self.execute('build-native',controller.command('build','postgres','app','worker','verification'),cwd=cwd,environment=env)
         self.execute('start-native-postgres',controller.command('up','-d','--wait','--wait-timeout','180','postgres'),cwd=cwd,environment=env)
         log=self.execute('native-postgres-tests',controller.command('run','--rm','-T','--no-deps','-e',
                          'PORTAL_ACCEPTANCE_RUN_ID='+self.run_id,'verification'),cwd=cwd,environment=env,timeout=1500)

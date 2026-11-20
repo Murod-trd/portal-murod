@@ -24,6 +24,8 @@ def verify_package(root):
     manifest=Path(root)/'RELEASE-MANIFEST.json'
     if not manifest.is_file():raise ConfigurationError('Use the packaged release, including RELEASE-MANIFEST.json')
     value=json.loads(manifest.read_text())
+    if not {'frontend-dist/index.html','frontend-dist/BUILD-PROVENANCE.json'}<=set(value.get('sha256',{})):
+        raise ConfigurationError('Release lacks the prebuilt frontend; package it with --include-frontend (servers never build JavaScript)')
     for name,expected in value['sha256'].items():
         path=Path(root)/name
         if not path.resolve().is_relative_to(Path(root).resolve()) or not path.is_file() or path.is_symlink():raise ConfigurationError('Release file missing/unsafe: '+name)
@@ -185,7 +187,7 @@ def install(controller,args):
     preflight(controller)
     try:
         controller.run('pull','clamav','proxy')
-        controller.run('build','postgres','frontend-tools','app','worker')
+        controller.run('build','postgres','app','worker')
         controller.run('up','-d','--wait','--wait-timeout','900','postgres','clamav')
         controller.ensure_search_extension()
         controller.run('run','--rm','--no-deps','migrate')
@@ -235,7 +237,7 @@ def update(controller):
     controller.environment['POSTGRES_STORAGE_FAMILY']=family
     private_write(controller.environment_path,'\n'.join(f'{key}={value}' for key,value in controller.environment.items())+'\n')
     try:
-        controller.run('pull','clamav','proxy');controller.run('build','postgres','frontend-tools','app','worker')
+        controller.run('pull','clamav','proxy');controller.run('build','postgres','app','worker')
     finally:
         controller.environment=previous
         private_write(controller.environment_path,'\n'.join(f'{key}={value}' for key,value in previous.items())+'\n')
@@ -243,6 +245,7 @@ def update(controller):
     controller.run('stop','proxy','worker','app')
     controller.use_release(release)
     for name,value in locked.items():controller.environment[name.upper()+'_IMAGE']=value
+    controller.environment.pop('NODE_IMAGE',None)  # earlier releases compiled the frontend on the server
     controller.environment['POSTGRES_STORAGE_FAMILY']=family
     private_write(controller.environment_path,'\n'.join(f'{key}={value}' for key,value in controller.environment.items())+'\n')
     try:

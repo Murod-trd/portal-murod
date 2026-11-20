@@ -8,6 +8,11 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+try:
+    from .frontend_dist import verify as verify_frontend
+except ImportError:
+    from frontend_dist import verify as verify_frontend
+
 
 def require_clean_source(root):
     status=subprocess.check_output(['git','status','--porcelain=v1','--untracked-files=all','-z'],cwd=root)
@@ -19,32 +24,7 @@ def frontend_files(root, source_names):
     """Include only a previously built tree matching this exact frontend source."""
     if any(name.startswith('frontend-dist/') for name in source_names):
         raise ValueError('Frontend outputs must remain untracked build artifacts')
-    directory=root/'frontend-dist'
-    if directory.is_symlink() or not directory.is_dir():
-        raise ValueError('Build the static frontend before packaging it')
-    paths=list(directory.rglob('*'))
-    if any(path.is_symlink() or not (path.is_file() or path.is_dir()) for path in paths):
-        raise ValueError('Unsafe frontend artifact path')
-    names=sorted(path.relative_to(directory).as_posix() for path in paths if path.is_file())
-    stamp=directory/'BUILD-PROVENANCE.json'
-    if not stamp.is_file():raise ValueError('Missing frontend build provenance; rebuild the frontend')
-    provenance=json.loads(stamp.read_text(encoding='utf-8'))
-    if provenance.get('format')!=1 or provenance.get('release')!=(root/'RELEASE').read_text().strip():
-        raise ValueError('Frontend build release mismatch')
-    expected_sources={name for name in source_names if name.startswith('apps/web/')}
-    expected_sources.update({'package.json','package-lock.json','RELEASE','scripts/build_frontend.mjs'})
-    if set(provenance.get('sourceSha256',{}))!=expected_sources:
-        raise ValueError('Frontend provenance source list mismatch')
-    for name,expected in provenance['sourceSha256'].items():
-        if hashlib.sha256((root/name).read_bytes()).hexdigest()!=expected:
-            raise ValueError('Frontend source changed since build: '+name)
-    expected_artifacts=set(names)-{'BUILD-PROVENANCE.json'}
-    if 'index.html' not in expected_artifacts or set(provenance.get('artifactSha256',{}))!=expected_artifacts:
-        raise ValueError('Frontend build artifact list mismatch')
-    for name,expected in provenance['artifactSha256'].items():
-        if hashlib.sha256((directory/name).read_bytes()).hexdigest()!=expected:
-            raise ValueError('Frontend artifact changed since build: '+name)
-    return ['frontend-dist/'+name for name in names]
+    return ['frontend-dist/'+name for name in verify_frontend(root,source_names)]
 
 
 def prepare(root,include_frontend=False):

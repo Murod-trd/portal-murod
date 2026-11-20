@@ -11,6 +11,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from operations.frontend_dist import verify as verify_frontend
 from operations.package_release import prepare,write_archive,write_checksum
 
 
@@ -67,7 +68,7 @@ class ReleasePackagingTests(unittest.TestCase):
     def frontend_fixture(self):
         (self.root/'.gitignore').write_text('RELEASE-MANIFEST.json\n.runtime/\nfrontend-dist/\n')
         sources={'apps/web/src/main.tsx':'synthetic source','package.json':'{}',
-                 'package-lock.json':'{}','scripts/build_frontend.mjs':'// synthetic build script'}
+                 'package-lock.json':'{}','apps/web/scripts/build.mjs':'// synthetic build script'}
         for name,content in sources.items():
             path=self.root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(content)
         self.git('add','.');self.git('-c','user.name=Test','-c','user.email=test@local.invalid','commit','-m','Synthetic frontend fixture')
@@ -99,6 +100,12 @@ class ReleasePackagingTests(unittest.TestCase):
         self.frontend_fixture();(self.root/'apps/web/src/main.tsx').write_text('changed source')
         self.git('add','.');self.git('-c','user.name=Test','-c','user.email=test@local.invalid','commit','-m','Changed synthetic source')
         with self.assertRaisesRegex(ValueError,'source changed since build'):prepare(self.root,include_frontend=True)
+
+    def test_frontend_verifier_matches_without_git(self):
+        self.frontend_fixture()
+        self.assertEqual(verify_frontend(self.root),['BUILD-PROVENANCE.json','index.html'])
+        (self.root/'apps/web/src/extra.ts').write_text('unbuilt source')
+        with self.assertRaisesRegex(ValueError,'source list mismatch'):verify_frontend(self.root)
 
     def test_frontend_rejects_missing_provenance(self):
         frontend=self.frontend_fixture();(frontend/'BUILD-PROVENANCE.json').unlink()

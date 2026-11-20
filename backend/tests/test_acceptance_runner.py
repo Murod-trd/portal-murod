@@ -12,7 +12,10 @@ from .test_production_operations import installation_root as installation_root
 
 def release(root):
     root.mkdir();(root/'README.md').write_text('Synthetic release')
-    value={'format':1,'release':'test-release','sourceCommit':'synthetic','sha256':{'README.md':hashlib.sha256((root/'README.md').read_bytes()).hexdigest()}}
+    (root/'frontend-dist').mkdir();(root/'frontend-dist/index.html').write_text('<p>Synthetic prebuilt UI</p>')
+    (root/'frontend-dist/BUILD-PROVENANCE.json').write_text('{}')
+    names=['README.md','frontend-dist/index.html','frontend-dist/BUILD-PROVENANCE.json']
+    value={'format':1,'release':'test-release','sourceCommit':'synthetic','sha256':{name:hashlib.sha256((root/name).read_bytes()).hexdigest() for name in names}}
     (root/'RELEASE-MANIFEST.json').write_text(json.dumps(value))
     return root
 
@@ -50,6 +53,13 @@ def test_release_copy_requires_integrity_and_is_separate_from_source(tmp_path):
     with pytest.raises(ConfigurationError):copy_release(source,source/'nested')
     (source/'README.md').write_text('Changed content')
     with pytest.raises(ConfigurationError,match='changed'):copy_release(source,tmp_path/'copy')
+    assert not (tmp_path/'copy').exists()
+
+
+def test_release_without_prebuilt_frontend_is_refused(tmp_path):
+    source=release(tmp_path/'release');manifest=json.loads((source/'RELEASE-MANIFEST.json').read_text())
+    del manifest['sha256']['frontend-dist/index.html'];(source/'RELEASE-MANIFEST.json').write_text(json.dumps(manifest))
+    with pytest.raises(ConfigurationError,match='prebuilt frontend'):copy_release(source,tmp_path/'copy')
     assert not (tmp_path/'copy').exists()
 
 

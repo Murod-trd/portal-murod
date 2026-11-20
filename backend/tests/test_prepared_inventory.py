@@ -39,16 +39,7 @@ def test_inventory_does_not_approve_missing_package(monkeypatch,tmp_path,output)
     assert inspect_prepared_platform('isolated-candidate','postgres',tmp_path)['passed'] is False
 
 
-@pytest.mark.parametrize('wrong',['none','version','hash','lock'])
-def test_compiler_inventory_checks_official_node_binary_and_lock(monkeypatch,tmp_path,wrong):
-    (tmp_path/'deploy').mkdir()
-    tools={'packages':{'npm':{'version':'12.2.1'},'undici':{'version':'6.29.1'}}}
-    native={'version':'24.22.2','binarySha256':'b'*64}
-    (tmp_path/'deploy/build-tools.lock.json').write_text(json.dumps(tools))
-    (tmp_path/'deploy/node-runtime.lock.json').write_text(json.dumps(native))
-    payload={'lock':tools,'nodeLock':native,'nodeSha256':'b'*64,'node':'v24.22.2','npm':'12.2.1','undici':'6.29.1'}
-    if wrong=='version':payload['node']='v24.22.1'
-    if wrong=='hash':payload['nodeSha256']='c'*64
-    if wrong=='lock':payload['nodeLock']={}
-    monkeypatch.setattr(subprocess,'check_output',lambda *args,**kwargs:json.dumps(payload))
-    assert inspect_prepared_platform('isolated-compiler','frontend-tools',tmp_path)['passed']==(wrong=='none')
+def test_inventory_refuses_any_platform_other_than_postgres(monkeypatch,tmp_path):
+    inventory_root(tmp_path)
+    monkeypatch.setattr(subprocess,'check_output',lambda *args,**kwargs:pytest.fail('nothing may run'))
+    assert inspect_prepared_platform('isolated-compiler','frontend-tools',tmp_path)=={'passed':False,'errorType':'ValueError'}

@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -157,12 +158,29 @@ def test_retention_preserves_recent_minimum_and_unrelated_directories(tmp_path):
     assert len(list(tmp_path.glob('2026*')))==3 and (unrelated/'keep.txt').exists()
 
 
-def test_dockerfile_runtime_has_no_node_and_build_args_are_global():
+def test_dockerfile_never_installs_node_and_build_args_are_global():
     dockerfile=(ROOT/'Dockerfile').read_text();prefix=dockerfile.split('FROM ',1)[0]
-    assert 'ARG PYTHON_IMAGE=' in prefix and 'ARG NODE_IMAGE=' in prefix
+    assert 'ARG PYTHON_IMAGE=' in prefix and 'ARG NODE_IMAGE' not in dockerfile
     runtime=dockerfile.split('FROM ${PYTHON_IMAGE} AS api',1)[1]
-    assert 'COPY --from=frontend /build/frontend-dist' in runtime
-    assert 'COPY --from=frontend /usr/local/bin/node' not in runtime
+    assert 'COPY --from=frontend /check/frontend-dist ./frontend-dist' in runtime
+    instructions=[line for line in dockerfile.splitlines() if line and not line.startswith('#')]
+    assert not [line for line in instructions if re.search(r'\b(node|npm|npx|yarn|pnpm)\b',line)]
+    assert 'RUN python operations/frontend_dist.py --root /check' in dockerfile
+
+
+def test_server_side_has_no_javascript():
+    """Owner rule: JavaScript/TypeScript only in the apps/web browser frontend, never on the server."""
+    tracked=subprocess.run(['git','ls-files','-z'],cwd=ROOT,capture_output=True,check=True).stdout.decode().split('\0')
+    scripts=[name for name in tracked if re.search(r'\.(c|m)?(j|t)sx?$',name)]
+    assert scripts and all(name.startswith('apps/web/') for name in scripts),[n for n in scripts if not n.startswith('apps/web/')]
+    import yaml
+    compose=yaml.safe_load((ROOT/'compose.yaml').read_text())
+    assert not [name for name in compose['services'] if 'node' in name or 'frontend' in name]
+    assert 'NODE_IMAGE' not in (ROOT/'compose.yaml').read_text()
+    server_python=[*ROOT.joinpath('backend').rglob('*.py'),*ROOT.joinpath('operations').rglob('*.py'),*ROOT.joinpath('scripts').glob('*.py'),ROOT/'portalctl']
+    pattern=re.compile(r"['\"](node|npm|npx|yarn|pnpm)['\"]|require\(['\"]node:")
+    offenders=[str(path.relative_to(ROOT)) for path in server_python if 'tests' not in path.parts and not path.name.startswith('test_') and pattern.search(path.read_text(encoding='utf-8'))]
+    assert offenders==[]
 
 def test_origin_is_canonical_for_browser_csrf():
     assert validate_origin('https://PORTAL.Example:443/')[0]=='https://portal.example'
@@ -298,7 +316,7 @@ def test_backup_containers_never_write_plaintext_streams_into_docker_logs():
 
 def test_every_runtime_base_image_is_fixed_by_registry_digest():
     images=json.loads((ROOT/'deploy/images.lock.json').read_text())['images']
-    assert set(images)=={'postgres','python','node','nginx','clamav'}
+    assert set(images)=={'postgres','python','nginx','clamav'}
     for reference in images.values():assert '@sha256:' in reference and len(reference.rsplit(':',1)[1])==64
 
 def test_tmpfs_options_are_single_absolute_mount_entries():

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
-const source=name=>fs.readFileSync(new URL('../apps/web/src/'+name,import.meta.url),'utf8');
+const source=name=>fs.readFileSync(new URL('../src/'+name,import.meta.url),'utf8');
 const compile=name=>ts.transpileModule(source(name),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 function module(name,require,extras={}){const exports={};new Function('exports','require',...Object.keys(extras),compile(name))(exports,require,...Object.values(extras));return exports;}
 const api=module('api.ts',()=>({}));

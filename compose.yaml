@@ -8,7 +8,6 @@ x-build: &build
   context: .
   target: api
   args:
-    NODE_IMAGE: ${NODE_IMAGE:?Pinned Node builder required}
     PYTHON_IMAGE: ${PYTHON_IMAGE:?Pinned Python required}
     POSTGRES_IMAGE: ${POSTGRES_IMAGE:?Pinned PostgreSQL base required}
 x-env: &env
@@ -166,15 +165,6 @@ services:
     volumes: [private-files:/var/lib/portal/files, backup-work:/var/lib/portal/backup-work]
     logging: {driver: none}
     profiles: [tools]
-  frontend-tools:
-    <<: *limits
-    image: ${PORTAL_IMAGE_PREFIX:-toshkent-invest-portal}-frontend-tools:${PORTAL_RELEASE:?Release required}
-    build:
-      <<: *build
-      target: frontend-tools
-    network_mode: none
-    profiles: [verification]
-    command: [node, --version]
   verification:
     <<: *limits
     image: ${PORTAL_IMAGE_PREFIX:-toshkent-invest-portal}-verification:${PORTAL_RELEASE:?Release required}
