@@ -245,3 +245,26 @@ def test_missing_stored_file_marks_extraction_as_error(hr):
     assert worker_fetch(hr[2],job,token).status_code==410
     version.refresh_from_db(),job.refresh_from_db()
     assert version.extraction_status=='ERROR' and version.extraction_error=='FILE_MISSING' and job.status=='ERROR'
+
+
+def test_extracted_text_with_nul_or_lone_surrogates_is_stored(hr):
+    doc,old,_=create_doc(hr)
+    job,token=running_job(old.file)
+    response=result(hr[2],job,token,{'text':'contract\x00 number \ud800 150','searchText':'extra\x00','pages':1})
+    assert response.status_code==200,response.content
+    old.refresh_from_db()
+    assert old.extraction_status=='READY' and old.extracted_text=='contract number \ufffd 150'
+    assert '\x00' not in old.normalized_text
+
+
+def test_long_request_path_is_audited_and_denied_not_a_server_error(hr,employee):
+    doc,old,_=create_doc(hr)
+    response=employee[2].post(f'/api/v1/documents/{doc.id}/versions/{old.id}/reprocess',{})
+    assert response.status_code==403 and response.json()['code']=='FORBIDDEN'
+    assert m.AuditLog.objects.filter(action='ACCESS_DENIED',entity_type='API').exists()
+
+
+def test_title_that_grows_under_normalization_is_saved(hr):
+    response=hr[2].post('/api/v1/documents',{'title':'№'*300,'category':'ORDER'})
+    assert response.status_code==201,response.content
+    assert len(m.Document.objects.get(pk=response.json()['id']).normalized_title)==300

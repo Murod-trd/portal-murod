@@ -1,5 +1,7 @@
 # Передача Toshkent Invest в ИТ — 0.3.0-rc.12
 
+> Для установки использовать релиз **0.3.0-rc.13** и пошаговую инструкцию [server-handoff/handout.md](server-handoff/handout.md). Результаты проверок ниже относятся к rc.12.
+
 Дата: 03.11.2026. По последнему решению владельца полную штатную установку/приёмку на Linux выполняет ИТ-служба. Это исходники Python backend/worker, статический frontend, миграции и установочные инструменты, а не уже развёрнутый корпоративный сервер и не офлайн-набор контейнеров.
 
 Локально подтверждены: 299 тестов на PostgreSQL без пропусков; TypeScript/ESLint/component/build; Ruff/Bandit High/Medium=0, Django/migrations/OpenAPI/types; base/prepared/final security gate без High/Critical; настоящий HTTPS трёх ролей, ClamAV/OCR/публикация/поиск; зашифрованное восстановление в отдельные тома. Полные границы и датированные доказательства: [статус](docs/RC12_TECHNICAL_STATUS_RU.md), [сводка](docs/verification/2026-11-03-rc12-summary.json). Три Medium одноразового npm builder остаются видимыми. Это не независимый пентест.

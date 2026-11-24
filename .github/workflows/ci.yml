@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:  # rebuild the release archive on demand (artifacts expire after 30 days)
 permissions:
   contents: read
 concurrency:
@@ -96,6 +97,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/release"
           python operations/package_release.py --include-frontend --output "$RUNNER_TEMP/release/toshkent-portal-$(cat RELEASE)-${GITHUB_SHA::12}.zip"
+      - name: Unpacked release is readable by the unprivileged container users
+        run: |
+          unzip -q "$RUNNER_TEMP"/release/*.zip -d "$RUNNER_TEMP/unpacked"
+          test -z "$(find "$RUNNER_TEMP/unpacked/portal" ! -perm -0444 -print -quit)"
       - uses: actions/upload-artifact@v4
         with:
           name: release-package
@@ -113,10 +118,31 @@ jobs:
         with:
           name: frontend-dist
           path: frontend-dist
-      - name: Build API and worker images
+      - name: Build PostgreSQL, API and worker images
         run: |
+          docker build --target postgres -t portal-ci-postgres .
           docker build --target api -t portal-ci-api .
           docker build --target worker -t portal-ci-worker .
+      - name: PostgreSQL initialises with the application roles
+        run: |
+          docker run -d --name portal-ci-pg -e POSTGRES_DB=portal -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=ci-only-admin -e POSTGRES_OWNER_PASSWORD=ci-only-owner -e POSTGRES_APP_PASSWORD=ci-only-app \
+            -v "$PWD/deploy/postgres/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro" portal-ci-postgres
+          for attempt in $(seq 60); do
+            docker exec portal-ci-pg pg_isready -q -h 127.0.0.1 -U postgres -d portal && break
+            sleep 2
+          done
+          test "$(docker exec portal-ci-pg psql -U postgres -d portal -Atc "SELECT count(*) FROM pg_roles WHERE rolname IN ('portal_owner','portal_app')")" = 2
+          docker rm -f portal-ci-pg
+      - name: Rendered nginx configuration is valid
+        run: |
+          mkdir -p "$RUNNER_TEMP/nginx/tls"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=portal.test \
+            -keyout "$RUNNER_TEMP/nginx/tls/privkey.pem" -out "$RUNNER_TEMP/nginx/tls/fullchain.pem"
+          sed -e 's#@@SERVER_NAME@@#portal.test#g' -e 's#@@EDGE_PROXY_TOKEN@@#ci-only#g' \
+            -e 's#@@NETWORK_ACL@@#allow 127.0.0.1/32; deny all;#' deploy/nginx.conf.in > "$RUNNER_TEMP/nginx/nginx.conf"
+          image="$(python3 -c 'import json;print(json.load(open("deploy/images.lock.json"))["images"]["nginx"])')"
+          docker run --rm -v "$RUNNER_TEMP/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$RUNNER_TEMP/nginx/tls:/etc/nginx/tls:ro" "$image" nginx -t
       - name: Runtime images contain no Node or npm
         run: |
           for image in portal-ci-api portal-ci-worker; do

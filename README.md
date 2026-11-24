@@ -1,10 +1,10 @@
 # Toshkent Invest — корпоративный портал
 
-Текущая редакция **0.3.0-rc.12**. Интерфейс: **UZ / RU / English**. По решению владельца вход — логин и пароль, без обязательных дополнительных экранов; серверная сессия на 12 часов. Новые возможности и подтверждённая область: [статус rc.12](docs/RC12_TECHNICAL_STATUS_RU.md), [5 замечаний владельца](docs/USER_REVIEW_TRACKER_RU.md). Штатную Linux-установку и подключение сервера выполняет ИТ. `productionApproved=false` до внешнего допуска.
+Текущая редакция **0.3.0-rc.13** (подготовка к серверу; проверки rc.12 ниже относятся к rc.12). Интерфейс: **UZ / RU / English**. По решению владельца вход — логин и пароль, без обязательных дополнительных экранов; серверная сессия на 12 часов. Новые возможности и подтверждённая область: [статус rc.12](docs/RC12_TECHNICAL_STATUS_RU.md), [5 замечаний владельца](docs/USER_REVIEW_TRACKER_RU.md). Штатную Linux-установку и подключение сервера выполняет ИТ. `productionApproved=false` до внешнего допуска.
 
 Backend и worker: Python/Django/DRF. Frontend: статический React/TypeScript/Vite. Node используется только для сборки браузерных файлов. Сервер, DNS/TLS/VPN и установку компании настраивает ИТ.
 
-Начните с [FOR_IT_RU.md](FOR_IT_RU.md). Инструкции: [HANDOVER_RU.md](HANDOVER_RU.md), [DEPLOYMENT.md](docs/DEPLOYMENT.md), [OPERATIONS.md](docs/OPERATIONS.md). Предстоящие проверки: [FINAL_VERIFICATION_RU.md](docs/FINAL_VERIFICATION_RU.md), браузерная матрица — [BROWSER_ACCEPTANCE_RU.md](docs/BROWSER_ACCEPTANCE_RU.md).
+Установка на сервер через Claude: [server-handoff/](server-handoff/README.md). Для ИТ: [FOR_IT_RU.md](FOR_IT_RU.md). Инструкции: [HANDOVER_RU.md](HANDOVER_RU.md), [DEPLOYMENT.md](docs/DEPLOYMENT.md), [OPERATIONS.md](docs/OPERATIONS.md). Предстоящие проверки: [FINAL_VERIFICATION_RU.md](docs/FINAL_VERIFICATION_RU.md), браузерная матрица — [BROWSER_ACCEPTANCE_RU.md](docs/BROWSER_ACCEPTANCE_RU.md).
 
 ## Реализованные разделы
 

@@ -16,7 +16,7 @@ class Office(Timestamped):
     normalized_name = models.CharField(max_length=200, db_index=True)
     active = models.BooleanField(default=True)
     def save(self, *args, **kwargs):
-        self.normalized_name = normalize(self.name)
+        self.normalized_name = normalize(self.name)[:200]  # NFKC may lengthen text (№ -> No)
         super().save(*args, **kwargs)
 
 class OrgUnit(Timestamped):
@@ -29,7 +29,7 @@ class OrgUnit(Timestamped):
     active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
     def save(self, *args, **kwargs):
-        self.normalized_name = normalize(self.name)
+        self.normalized_name = normalize(self.name)[:200]  # NFKC may lengthen text (№ -> No)
         super().save(*args, **kwargs)
 
 class EmployeeNumber(models.Model):
@@ -58,7 +58,7 @@ class Employee(Timestamped):
     status = models.CharField(max_length=16, choices=[('ACTIVE','ACTIVE'),('ARCHIVED','ARCHIVED')], default='ACTIVE', db_index=True)
     archived_at = models.DateTimeField(null=True, blank=True)
     def save(self, *args, **kwargs):
-        self.normalized_name, self.normalized_position = normalize(self.display_name), normalize(self.position_title)
+        self.normalized_name, self.normalized_position = normalize(self.display_name)[:200], normalize(self.position_title)[:200]
         if not self.employee_number:
             self.employee_number = f'TI-{EmployeeNumber.objects.create().id:06d}'
         super().save(*args, **kwargs)
@@ -107,7 +107,7 @@ class News(Timestamped):
     expires_at = models.DateTimeField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
     def save(self, *args, **kwargs):
-        self.normalized_title = normalize(self.title)
+        self.normalized_title = normalize(self.title)[:300]
         super().save(*args, **kwargs)
 
 class NewsView(models.Model):
@@ -142,7 +142,7 @@ class Document(Timestamped):
     class Meta:
         indexes = [GinIndex(fields=['normalized_title'], name='portal_doc_title_trgm', opclasses=['gin_trgm_ops'])]
     def save(self, *args, **kwargs):
-        self.normalized_title = normalize(self.title)
+        self.normalized_title = normalize(self.title)[:300]
         super().save(*args, **kwargs)
 
 class DocumentVersion(models.Model):

@@ -17,6 +17,10 @@ def search_fold(value):
     # either way finds text that OCR rendered as Ø, ⌀, O or Ö.
     return normalize(value).translate(str.maketrans({'ö':'o','ğ':'g','ş':'s','ç':'c','ў':'у','қ':'к','ғ':'г','ҳ':'х','ø':'o','⌀':'o'}))
 
+def storable_text(value):
+    """Extracted text as PostgreSQL can keep it: some PDFs yield NUL characters or lone UTF-16 surrogates."""
+    return re.sub(r'[\ud800-\udfff]', '\ufffd', value.replace('\x00', ''))
+
 def initials(value):
     return ''.join(x[0] for x in str(value).split()[:2]).upper()
 

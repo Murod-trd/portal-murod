@@ -387,6 +387,39 @@ def test_configuration_allows_isolated_recovery_project_and_rejects_command_text
     assert read_environment(root/'.deploy/portal.env')['COMPOSE_PROJECT_NAME'] == 'portal-recovery-acceptance'
 
 
+@posix_modes
+def test_release_files_become_readable_for_container_users_but_secrets_stay_private(tmp_path):
+    from operations.control import make_release_readable
+    (tmp_path/'deploy/postgres').mkdir(parents=True);(tmp_path/'.deploy').mkdir(mode=0o700)
+    script=tmp_path/'deploy/postgres/01-roles.sh';script.write_text('#!/bin/sh\n')
+    secret=tmp_path/'.deploy/portal.env';secret.write_text('SYNTHETIC=1\n')
+    manifest=tmp_path/'RELEASE-MANIFEST.json';manifest.write_text('{}')
+    for path in [script,secret,manifest]:path.chmod(0o600)
+    for path in [tmp_path/'deploy',tmp_path/'deploy/postgres']:path.chmod(0o700)
+    make_release_readable(tmp_path,{'sha256':{'deploy/postgres/01-roles.sh':''}})
+    assert script.stat().st_mode & 0o777==0o644 and manifest.stat().st_mode & 0o777==0o644
+    assert (tmp_path/'deploy').stat().st_mode & 0o777==0o755 and (tmp_path/'deploy/postgres').stat().st_mode & 0o777==0o755
+    assert secret.stat().st_mode & 0o777==0o600 and (tmp_path/'.deploy').stat().st_mode & 0o777==0o700
+
+
+def test_readiness_probe_leaves_stdin_for_the_administrator_password(installation_root,monkeypatch):
+    from types import SimpleNamespace
+    from operations.control import Controller
+    root,cert,key=installation_root
+    configure(root,'https://portal.test.internal','127.0.0.1',['127.0.0.1/32'],cert,key)
+    controller=Controller(root);seen=[]
+    def run(arguments,**kwargs):seen.append(kwargs.get('stdin'));return SimpleNamespace(returncode=0)
+    monkeypatch.setattr('operations.control.subprocess.run',run)
+    controller.wait_ready()
+    assert seen==[subprocess.DEVNULL]
+
+
+def test_nginx_resolves_the_api_container_again_after_its_restart():
+    template=(ROOT/'deploy/nginx.conf.in').read_text()
+    assert 'resolver 127.0.0.11 valid=10s ipv6=off;' in template and 'set $portal_api http://app:8000;' in template
+    assert template.count('proxy_pass $portal_api;')==template.count('proxy_pass ')==3  # a literal upstream would pin the first address
+
+
 def test_nginx_answers_oversize_uploads_with_the_api_error_shape():
     import json,re
     template=(ROOT/'deploy/nginx.conf.in').read_text()
