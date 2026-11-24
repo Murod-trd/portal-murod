@@ -19,7 +19,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from . import models as m
-from .domain import search_fold
+from .domain import search_fold,storable_text
 from .errors import PortalError
 from .security import audit, throttle, managed, domain_write
 from .services import get_or_error
@@ -313,6 +313,8 @@ class WorkerResultView(WorkerView):
                 pages=result.get('pages')
                 if pages is not None and (type(pages) is not int or pages>settings.MAX_OCR_PAGES or pages<0):
                     raise PortalError('PAGE_LIMIT')
+                # The parser is untrusted: its output must never fail the database write and retry forever.
+                text,search_text=storable_text(text),storable_text(search_text)
                 # Trash is reversible: finish indexing its existing versions as well.
                 m.DocumentVersion.objects.filter(file=file).update(extraction_status='READY',extraction_error='',extracted_text=text,normalized_text=search_fold(text+'\n'+search_text),pages=pages,ocr_quality=quality)
                 job.status='DONE'

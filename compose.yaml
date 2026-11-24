@@ -129,7 +129,7 @@ services:
     image: ${CLAMAV_IMAGE:?Pinned ClamAV required}
     volumes: [clamav-data:/var/lib/clamav]
     networks: [jobs, signatures-egress]
-    mem_limit: 3g
+    mem_limit: 4g
     pids_limit: 128
     logging: *logging
     restart: unless-stopped

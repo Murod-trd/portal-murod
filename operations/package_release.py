@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -44,6 +45,16 @@ def prepare(root,include_frontend=False):
     return names,manifest
 
 
+def archive_entry(name):
+    """Explicit modes: ZipFile.writestr() with a plain name stores 0600, and after `unzip` the
+    unprivileged users inside the containers could not read the release files."""
+    entry=zipfile.ZipInfo('portal/'+name,date_time=time.localtime()[:6])
+    entry.compress_type=zipfile.ZIP_DEFLATED
+    entry.create_system=3  # Unix: `unzip` applies the stored mode
+    entry.external_attr=(0o100000|(0o755 if name=='portalctl' or name.endswith('.sh') else 0o644))<<16
+    return entry
+
+
 def write_archive(root,names,manifest,target):
     target=Path(target);target.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=target.parent,prefix='.portal-release-',suffix='.zip',delete=False) as temporary:
@@ -54,8 +65,8 @@ def write_archive(root,names,manifest,target):
                 data=(root/name).read_bytes()
                 if hashlib.sha256(data).hexdigest()!=manifest['sha256'][name]:
                     raise ValueError('Source changed during packaging: '+name)
-                archive.writestr('portal/'+name,data)
-            archive.writestr('portal/RELEASE-MANIFEST.json',json.dumps(manifest,sort_keys=True,indent=2)+'\n')
+                archive.writestr(archive_entry(name),data)
+            archive.writestr(archive_entry('RELEASE-MANIFEST.json'),json.dumps(manifest,sort_keys=True,indent=2)+'\n')
         with zipfile.ZipFile(staged) as archive:
             if archive.testzip():raise ValueError('Release ZIP validation failed')
         require_clean_source(root)

@@ -113,7 +113,7 @@ def main():
     summary = {'generatedAt': datetime.now(timezone.utc).isoformat(), 'tool': version, 'scope': args.scope,
                'scopeNote': {'base':'Unmodified pinned upstream bases; no findings suppressed.',
                              'final':'Built Python application and OCR worker images.',
-                             'prepared':'Prepared PostgreSQL image and disposable frontend compiler tools; upstream base findings remain separate.'}[args.scope],
+                             'prepared':'Prepared PostgreSQL image; upstream base findings remain separate.'}[args.scope],
                'passed': not any(row['highCritical'] or not row.get('nativeComponent',{'passed':True})['passed'] for row in results), 'results': results}
     (output/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
     print(json.dumps(summary, indent=2))

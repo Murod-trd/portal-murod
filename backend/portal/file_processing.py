@@ -13,6 +13,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
+from .domain import storable_text
 
 class ProcessingError(Exception):
     def __init__(self, code):
@@ -414,6 +415,10 @@ def extract_image(data,extension,languages,max_pages):
     return {'text':'\n\n'.join(texts),'searchText':'\n'.join(search_parts),'pages':count,'quality':run.quality()}
 
 def extract_text(data,name,languages,max_pages):
+    result=extract_content(data,name,languages,max_pages)
+    return {key:storable_text(value) if key in {'text','searchText'} else value for key,value in result.items()}
+
+def extract_content(data,name,languages,max_pages):
     if name.lower().endswith('.docx'):
         return extract_docx(data,languages)
     if Path(name.lower()).suffix in SCAN_EXTENSIONS:

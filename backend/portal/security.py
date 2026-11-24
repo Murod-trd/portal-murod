@@ -10,7 +10,7 @@ from .errors import PortalError
 from .models import AuditLog, RateLimit, WriteLock
 
 def audit(user, action, entity, entity_id='', fields=None, outcome='SUCCESS', metadata=None):
-    AuditLog.objects.create(actor=user if user and user.is_authenticated else None, action=action, entity_type=entity, entity_id=str(entity_id), changed_fields=list(fields or []), outcome=outcome, metadata=metadata or {})
+    AuditLog.objects.create(actor=user if user and user.is_authenticated else None, action=action, entity_type=entity, entity_id=str(entity_id)[:80], changed_fields=list(fields or []), outcome=outcome, metadata=metadata or {})
 
 @contextmanager
 def domain_write():

@@ -40,6 +40,8 @@ class ReleasePackagingTests(unittest.TestCase):
         with zipfile.ZipFile(target) as archive:
             self.assertEqual(set(archive.namelist()),{'portal/'+name for name in names}|{'portal/RELEASE-MANIFEST.json'})
             self.assertEqual(json.loads(archive.read('portal/RELEASE-MANIFEST.json')),manifest)
+            for entry in archive.infolist():  # container users read these files after `unzip`
+                self.assertEqual((entry.create_system,(entry.external_attr>>16)&0o444),(3,0o444))
             for name,expected in manifest['sha256'].items():
                 self.assertEqual(hashlib.sha256(archive.read('portal/'+name)).hexdigest(),expected)
 

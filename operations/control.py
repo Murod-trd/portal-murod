@@ -33,6 +33,21 @@ def verify_package(root):
     return value
 
 
+def make_release_readable(root,manifest):
+    """Image builds and bind mounts keep host file modes, and containers run as unprivileged users.
+    An archive unpacked with 0600 files or under a strict umask would fail inside them. Only files
+    listed in the verified manifest are touched; .deploy (secrets, keys, TLS) never is."""
+    root=Path(root).resolve();directories=set()
+    for name in [*manifest['sha256'],'RELEASE-MANIFEST.json']:
+        path=root/name
+        directories.update(parent for parent in path.parents if parent!=root and parent.is_relative_to(root))
+        mode=path.stat().st_mode & 0o7777
+        if mode & 0o444!=0o444:path.chmod(mode|0o444)
+    for directory in directories:
+        mode=directory.stat().st_mode & 0o7777
+        if mode & 0o555!=0o555:directory.chmod(mode|0o555)
+
+
 class Controller:
     def __init__(self,root=ROOT):
         self.root=Path(root).resolve();self.directory=self.root/'.deploy'
@@ -79,7 +94,7 @@ class Controller:
         args=['run','--rm','-T','--no-deps','app','python','backend/manage.py','verify_deployment']
         if pipeline:args.append('--pipeline')
         if files:args.append('--files')
-        done=subprocess.run(self.command(*args),cwd=self.root,env=self.process_environment,capture_output=True,timeout=1200,check=False)
+        done=subprocess.run(self.command(*args),cwd=self.root,env=self.process_environment,stdin=subprocess.DEVNULL,capture_output=True,timeout=1200,check=False)
         try:report=json.loads(done.stdout)
         except ValueError as error:raise ConfigurationError('Technical check did not produce a valid report') from error
         private_write(self.directory/'last-check.json',json.dumps(report,indent=2)+'\n')
@@ -111,7 +126,8 @@ class Controller:
         deadline=time.monotonic()+timeout
         while time.monotonic()<deadline:
             command=self.command('exec','-T','app','python','operations/health.py','api-ready')
-            done=subprocess.run(command,cwd=self.root,env=self.process_environment,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30,check=False)
+            # `compose exec -T` forwards stdin: without DEVNULL it would swallow the password meant for --password-stdin.
+            done=subprocess.run(command,cwd=self.root,env=self.process_environment,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30,check=False)
             if done.returncode==0:return
             time.sleep(5)
         raise ConfigurationError('Readiness timed out. Check ClamAV signatures, worker health and private storage.')
@@ -157,7 +173,7 @@ def preflight(controller,package=True):
     if platform.system()!='Linux' or platform.machine() not in {'x86_64','AMD64'}:
         raise ConfigurationError('This release requires Linux x86_64. On Windows Server, use a Linux virtual machine.')
     if sys.version_info<(3,10):raise ConfigurationError('Python 3.10+ is required on the host')
-    if package:verify_package(controller.root)
+    if package:make_release_readable(controller.root,verify_package(controller.root))
     if not shutil.which('docker'):raise ConfigurationError('IT must install Docker Engine with Compose v2 first')
     context=subprocess.run(['docker','context','inspect'],capture_output=True,timeout=15,check=False)
     try:endpoint=json.loads(context.stdout)[0]['Endpoints']['docker']['Host']

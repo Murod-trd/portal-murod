@@ -52,7 +52,7 @@ def encrypt_command(source_command,codec_command,destination,key,environment=Non
     with open(destination,'xb') as output:
         os.chmod(destination,0o600)
         # Errors intentionally omit command/environment dumps and plaintext contents.
-        source=subprocess.Popen(source_command,env=environment,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+        source=subprocess.Popen(source_command,env=environment,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
         codec=subprocess.Popen(codec_command,env=environment,stdin=subprocess.PIPE,stdout=output,stderr=subprocess.DEVNULL)
         watchdog=threading.Timer(3600,lambda:[process.kill() for process in [source,codec] if process.poll() is None]);watchdog.daemon=True;watchdog.start()
         try:
