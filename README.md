@@ -4,7 +4,7 @@
 
 Backend и worker: Python/Django/DRF. Frontend: статический React/TypeScript/Vite. Node используется только для сборки браузерных файлов. Сервер, DNS/TLS/VPN и установку компании настраивает ИТ.
 
-Установка на сервер через Claude: [server-handoff/](server-handoff/README.md). Для ИТ: [FOR_IT_RU.md](FOR_IT_RU.md). Инструкции: [HANDOVER_RU.md](HANDOVER_RU.md), [DEPLOYMENT.md](docs/DEPLOYMENT.md), [OPERATIONS.md](docs/OPERATIONS.md). Предстоящие проверки: [FINAL_VERIFICATION_RU.md](docs/FINAL_VERIFICATION_RU.md), браузерная матрица — [BROWSER_ACCEPTANCE_RU.md](docs/BROWSER_ACCEPTANCE_RU.md).
+**Передача в ИТ и установка, всё в одном файле: [server-handoff/handout.md](server-handoff/handout.md).** Промпт для Claude на сервере: [PROMPT.md](server-handoff/PROMPT.md). Для ИТ: [FOR_IT_RU.md](FOR_IT_RU.md). Инструкции: [HANDOVER_RU.md](HANDOVER_RU.md), [DEPLOYMENT.md](docs/DEPLOYMENT.md), [OPERATIONS.md](docs/OPERATIONS.md). Предстоящие проверки: [FINAL_VERIFICATION_RU.md](docs/FINAL_VERIFICATION_RU.md), браузерная матрица — [BROWSER_ACCEPTANCE_RU.md](docs/BROWSER_ACCEPTANCE_RU.md).
 
 ## Реализованные разделы
 
